@@ -7,17 +7,19 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-brokex-solana = "7DPzhH46ojNiQLfrQMZ3CTpBQR6mGAzzGvEUVMwEPNMy"
+brokex-core = "7DPzhH46ojNiQLfrQMZ3CTpBQR6mGAzzGvEUVMwEPNMy"
+brokex-vault = "4fgPnwcAxYT3QAutMSLPMNczp4fPugTZYotdmZGsy6sR"
 
 [programs.localnet]
 brokex-vault = "4fgPnwcAxYT3QAutMSLPMNczp4fPugTZYotdmZGsy6sR"
-brokex_solana = "6Ymggvkuy7Yw4TvnjMKfMw1DCs9oguKrQfVzvHSyMP4S"
+brokex_core = "6Ymggvkuy7Yw4TvnjMKfMw1DCs9oguKrQfVzvHSyMP4S"
 
 [provider]
-cluster = "localnet"
+cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "cargo test"
+test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+
 
 [hooks]

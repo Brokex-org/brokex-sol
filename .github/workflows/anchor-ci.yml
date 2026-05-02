@@ -33,10 +33,11 @@ jobs:
 
       - name: Install Anchor CLI via AVM
         env:
-          # Cargo’s libgit2 path can fail to fetch public GitHub URLs in CI; use the git CLI.
+          # Use git CLI for HTTPS fetches (more reliable in CI than Cargo’s libgit2).
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: |
-          cargo install --git https://github.com/coral-xyz/avm avm --locked --force
+          # AVM lives in the Anchor repo, not a separate `avm` repository.
+          cargo install --git https://github.com/solana-foundation/anchor avm --locked --force
           avm install latest
           avm use latest
 

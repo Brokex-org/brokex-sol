@@ -4,10 +4,13 @@ on:
   push:
     branches:
       - main
+      - next-release
+      - "feat/**"
 
   pull_request:
     branches:
       - main
+      - next-release
 
 jobs:
   build:
@@ -33,10 +36,9 @@ jobs:
 
       - name: Install Anchor CLI via AVM
         env:
-          # Use git CLI for HTTPS fetches (more reliable in CI than Cargo’s libgit2).
+          # Use git CLI for HTTPS fetches (more reliable in CI than Cargo's libgit2).
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: |
-          # AVM lives in the Anchor repo, not a separate `avm` repository.
           cargo install --git https://github.com/solana-foundation/anchor avm --locked --force
           avm install latest
           avm use latest
@@ -51,9 +53,14 @@ jobs:
         run: solana config set --url devnet
 
       # CI has no committed program keypair; cache may restore a different key than declare_id!.
-      - name: Build Anchor program
+      - name: Build Anchor programs
         run: anchor build --ignore-keys
 
-      - name: Run tests
-        # Default `surfpool` is not installed on the runner; use the Solana CLI test validator.
-        run: anchor test --skip-deploy --skip-build --validator legacy
+      # Rust unit integration tests
+      - name: Run Rust tests
+        run: cargo test --package brokex-solana -- --nocapture
+
+      # TypeScript integration tests via ts-mocha against local validator
+      # anchor test handles: start validator → deploy → run [scripts.test] → stop validator
+      - name: Run TypeScript tests
+        run: anchor test --skip-build --validator legacy

@@ -20,44 +20,44 @@ Key mechanics:
 
 ## Folder Structure
 
+```text
 brokex-solana/
 ├── programs/
-│ ├── brokex-core/
-│ │ └── src/
-│ │ ├── lib.rs # Core program entry point
-│ │ ├── constants.rs
-│ │ ├── errors.rs
-│ │ ├── state/
-│ │ │ ├── config.rs # Protocol config PDA (admin, paused)
-│ │ │ ├── asset.rs # Per-asset config (Pyth feed, leverage, enabled)
-│ │ │ └── position.rs # Trader position accounts
-│ │ ├── instructions/
-│ │ │ ├── initialize.rs # Initialize protocol config
-│ │ │ ├── add_asset.rs # Register tradable asset
-│ │ │ ├── open_position.rs
-│ │ │ └── close_position.rs
-│ │ └── oracle/
-│ │ └── pyth.rs # Pyth price feed integration
-│ └── brokex-vault/
-│ └── src/
-│ ├── lib.rs # Vault program entry point
-│ ├── errors.rs
-│ ├── state/
-│ │ └── vault.rs # Vault state PDA
-│ └── instructions/
-│ ├── initialize.rs # Initialize vault
-│ ├── deposit.rs # Admin deposit USDC
-│ ├── withdraw.rs # Admin withdraw USDC
-│ └── settle.rs # CPI target — pay/receive from Core
-├── tests/ # Anchor integration tests
-├── scripts/
-│ └── set-program-id.sh # Auto-injects program IDs into lib.rs and Anchor.toml
+│   ├── brokex-core/
+│   │   └── src/
+│   │       ├── lib.rs              # Core program entry point
+│   │       ├── constants.rs
+│   │       ├── errors.rs
+│   │       ├── state/
+│   │       │   ├── config.rs       # Protocol config PDA (admin, paused)
+│   │       │   ├── asset.rs        # Per-asset config (Pyth feed, leverage, enabled)
+│   │       │   └── position.rs     # Trader position accounts
+│   │       ├── instructions/
+│   │       │   ├── initialize.rs   # Initialize protocol config
+│   │       │   ├── add_asset.rs    # Register tradable asset
+│   │       │   ├── open_position.rs
+│   │       │   └── close_position.rs
+│   │       └── oracle/
+│   │           └── pyth.rs         # Pyth price feed integration
+│   └── brokex-vault/
+│       └── src/
+│           ├── lib.rs              # Vault program entry point
+│           ├── errors.rs
+│           ├── state/
+│           │   └── vault.rs        # Vault state PDA
+│           └── instructions/
+│               ├── initialize.rs   # Initialize vault
+│               ├── deposit.rs      # Admin deposit USDC
+│               ├── withdraw.rs     # Admin withdraw USDC
+│               └── settle.rs       # CPI target — pay/receive from Core
+├── tests/                          # Anchor integration tests
 ├── docs/
 ├── .env.example
 ├── Anchor.toml
 ├── Cargo.toml
 ├── CONTRIBUTION.md
 └── package.json
+```
 
 ## Prerequisites
 

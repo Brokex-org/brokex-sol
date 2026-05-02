@@ -766,6 +766,8 @@ dependencies = [
  "anchor-lang",
  "anchor-litesvm",
  "anchor-spl",
+ "spl-associated-token-account",
+ "spl-token",
 ]
 
 [[package]]

@@ -14,11 +14,11 @@ describe("brokex-core", () => {
   const program = anchor.workspace.BrokexCore as Program<BrokexCore>;
   const admin   = provider.wallet;
 
-  const [configPda] = PublicKey.find_program_addressSync([CONFIG_SEED], program.programId);
+  const [configPda] = PublicKey.findProgramAddressSync([CONFIG_SEED], program.programId);
 
   const assetId  = "SOL/USD";
   const pythFeed = Keypair.generate().publicKey;
-  const [assetPda] = PublicKey.find_program_addressSync(
+  const [assetPda] = PublicKey.findProgramAddressSync(
     [ASSET_SEED, Buffer.from(assetId)],
     program.programId
   );

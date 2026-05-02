@@ -1,9 +1,17 @@
 use anchor_lang::prelude::*;
 use brokex_core::oracle::{normalize_price, PriceFeedMessage, PRICE_PRECISION};
 
+// Offset math: 8 (discriminator) + 32 (header)
+const MSG_OFFSET_BASE: usize = 40;
+
 fn make_account_data(msg: &PriceFeedMessage, full_vl: bool) -> Vec<u8> {
     let mut buf = vec![0u8; 8 + 32];
-    if full_vl { buf.push(1); } else { buf.extend_from_slice(&[0, 2]); }
+    if full_vl { 
+        buf.push(1); // 1 byte verification header
+    } else { 
+        buf.extend_from_slice(&[0, 2]); // 2 byte verification header
+    }
+    use anchor_lang::AnchorSerialize;
     msg.serialize(&mut buf).unwrap();
     buf
 }
@@ -45,8 +53,9 @@ fn normalize_exponent_positive() {
 fn parses_full_verification_level() {
     let m = msg(6_500_000_000_000, 1_000_000, -8, 1_000_000);
     let data = make_account_data(&m, true);
-    // Use AnchorDeserialize::try_from_slice
-    let parsed = PriceFeedMessage::try_from_slice(&data[41..]).unwrap();
+    
+    // Offset = Base(40) + 1 (full verification byte) = 41
+    let parsed = PriceFeedMessage::try_from_slice(&data[MSG_OFFSET_BASE + 1..]).unwrap();
     assert_eq!(parsed.price, m.price);
     assert_eq!(parsed.conf, m.conf);
 }
@@ -55,7 +64,9 @@ fn parses_full_verification_level() {
 fn parses_partial_verification_level() {
     let m = msg(6_500_000_000_000, 1_000_000, -8, 1_000_000);
     let data = make_account_data(&m, false);
-    let parsed = PriceFeedMessage::try_from_slice(&data[42..]).unwrap();
+    
+    // Offset = Base(40) + 2 (partial verification bytes) = 42
+    let parsed = PriceFeedMessage::try_from_slice(&data[MSG_OFFSET_BASE + 2..]).unwrap();
     assert_eq!(parsed.price, m.price);
 }
 

@@ -2,10 +2,14 @@
   "license": "ISC",
   "scripts": {
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
-    "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check"
+    "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check",
+    "test:anchor": "anchor test --validator legacy"
   },
   "dependencies": {
-    "@anchor-lang/core": "^1.0.1"
+    "@anchor-lang/core": "^1.0.1",
+    "@coral-xyz/anchor": "^0.31.0",
+    "@solana/web3.js": "^1.98.0",
+    "@solana/spl-token": "^0.4.9"
   },
   "devDependencies": {
     "chai": "^4.3.4",

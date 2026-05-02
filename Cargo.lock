@@ -336,7 +336,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "brokex-solana"
+name = "brokex-core"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",

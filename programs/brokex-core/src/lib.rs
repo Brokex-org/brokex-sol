@@ -7,9 +7,9 @@ use anchor_lang::prelude::*;
 
 pub use constants::*;
 pub use instructions::*;
-pub use state::*;
 
-declare_id!("6Ymggvkuy7Yw4TvnjMKfMw1DCs9oguKrQfVzvHSyMP4S");
+
+declare_id!("9bPWLjPxqR78kR63YokXeQ8k1nLDHfagh4W2117vjyWu");
 
 #[program]
 pub mod brokex_solana {

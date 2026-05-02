@@ -50,8 +50,9 @@ jobs:
       - name: Set Solana cluster to devnet
         run: solana config set --url devnet
 
+      # CI has no committed program keypair; cache may restore a different key than declare_id!.
       - name: Build Anchor program
-        run: anchor build
+        run: anchor build --ignore-keys
 
       - name: Run tests
-        run: anchor test --skip-deploy
+        run: anchor test --skip-deploy --skip-build

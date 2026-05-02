@@ -58,7 +58,7 @@ jobs:
 
       # Rust unit integration tests
       - name: Run Rust tests
-        run: cargo test --package brokex-solana -- --nocapture
+        run: cargo test --package brokex-core -- --nocapture
 
       # TypeScript integration tests via ts-mocha against local validator
       # anchor test handles: start validator → deploy → run [scripts.test] → stop validator

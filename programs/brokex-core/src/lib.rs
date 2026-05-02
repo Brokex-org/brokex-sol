@@ -13,7 +13,7 @@ pub use state::*;
 declare_id!("98rvC5A8ibBdw5qCwP6sL8h41x4iugGZpMXDBoabe1nN");
 
 #[program]
-pub mod brokex_solana {
+pub mod brokex_core {
     use super::*;
 
     pub fn initialize_protocol(ctx: Context<InitializeProtocol>) -> Result<()> {

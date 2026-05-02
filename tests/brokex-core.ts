@@ -1,8 +1,8 @@
-import * as anchor from "@anchor-lang/core";
-import { Program, AnchorProvider } from "@anchor-lang/core";
+import * as anchor from "@coral-xyz/anchor";
+import { Program, AnchorProvider } from "@coral-xyz/anchor";
 import { Keypair, PublicKey, SystemProgram, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { assert } from "chai";
-import { BrokexSolana } from "../target/types/brokex_solana";
+import { BrokexCore } from "../target/types/brokex_core";
 
 const CONFIG_SEED = Buffer.from("config");
 const ASSET_SEED  = Buffer.from("asset");
@@ -11,14 +11,14 @@ describe("brokex-core", () => {
   const provider = AnchorProvider.env();
   anchor.setProvider(provider);
 
-  const program = anchor.workspace.BrokexSolana as Program<BrokexSolana>;
+  const program = anchor.workspace.BrokexCore as Program<BrokexCore>;
   const admin   = provider.wallet;
 
-  const [configPda] = PublicKey.findProgramAddressSync([CONFIG_SEED], program.programId);
+  const [configPda] = PublicKey.find_program_addressSync([CONFIG_SEED], program.programId);
 
   const assetId  = "SOL/USD";
   const pythFeed = Keypair.generate().publicKey;
-  const [assetPda] = PublicKey.findProgramAddressSync(
+  const [assetPda] = PublicKey.find_program_addressSync(
     [ASSET_SEED, Buffer.from(assetId)],
     program.programId
   );

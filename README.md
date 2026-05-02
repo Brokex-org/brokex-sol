@@ -164,6 +164,13 @@ A circuit breaker that halts trading, disables new orders, and allows traders to
 
 ---
 
+## Contributing
+
+Development happens on **`next-release`** — open PRs against that branch, not `main`. Use branches like `feat/*`, `fix/*`, and `chore/*`, keep one feature per branch, and run `anchor build` before submitting.
+
+**[Full guidelines → `CONTRIBUTION.md`](CONTRIBUTION.md)** (setup, branch table, PR workflow, review rules, and ground rules).
+
+---
 
 ## License
 

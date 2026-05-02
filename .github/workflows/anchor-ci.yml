@@ -47,7 +47,9 @@ jobs:
         run: yarn install
 
       - name: Generate keypair for CI
-        run: solana-keygen new --no-bip39-passphrase --outfile ~/.config/solana/id.json
+        run: |
+          mkdir -p keys
+          solana-keygen new --no-bip39-passphrase --outfile keys/localnet-authority.json
 
       - name: Set Solana cluster to devnet
         run: solana config set --url devnet

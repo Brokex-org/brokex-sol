@@ -55,4 +55,5 @@ jobs:
         run: anchor build --ignore-keys
 
       - name: Run tests
-        run: anchor test --skip-deploy --skip-build
+        # Default `surfpool` is not installed on the runner; use the Solana CLI test validator.
+        run: anchor test --skip-deploy --skip-build --validator legacy

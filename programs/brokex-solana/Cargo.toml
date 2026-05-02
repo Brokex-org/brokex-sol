@@ -23,14 +23,5 @@ custom-panic = []
 anchor-lang.workspace = true
 anchor-spl.workspace = true
 
-[dev-dependencies]
-litesvm = "0.7.1"
-solana-instruction = "2.3.3"
-solana-keypair = "2.2"
-solana-message = "2.4.0"
-solana-pubkey = "2.4.0"
-solana-signer = "2.2"
-solana-transaction = "2.2"
-
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

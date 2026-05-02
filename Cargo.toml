@@ -7,6 +7,7 @@ resolver = "2"
 [workspace.dependencies]
 anchor-lang = "1.0.1"
 anchor-spl = "1.0.1"
+solana-program = "4.0.0"
 
 [profile.release]
 overflow-checks = true

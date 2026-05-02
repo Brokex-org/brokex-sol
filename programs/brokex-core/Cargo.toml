@@ -20,8 +20,11 @@ custom-heap = []
 custom-panic = []
 
 [dependencies]
-anchor-lang.workspace = true
-anchor-spl.workspace = true
+anchor-lang = { workspace = true }
+anchor-spl = { workspace = true }
+
+[dev-dependencies]
+anchor-litesvm = "0.4.0"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

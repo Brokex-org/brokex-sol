@@ -7,9 +7,8 @@ use anchor_lang::prelude::*;
 
 pub use constants::*;
 pub use instructions::*;
-pub use state::*;
 
-declare_id!("4fgPnwcAxYT3QAutMSLPMNczp4fPugTZYotdmZGsy6sR");
+declare_id!("DYG1pqLqLjU7JuZfHqMR8ZfvZtL2XneuaXFaAjwXkrXV");
 
 #[program]
 pub mod brokex_vault {

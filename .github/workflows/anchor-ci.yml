@@ -49,8 +49,8 @@ jobs:
       - name: Generate keypair for CI
         run: solana-keygen new --no-bip39-passphrase --outfile ~/.config/solana/id.json
 
-      - name: Set Solana cluster to localnet
-        run: solana config set --url localhost
+      - name: Set Solana cluster to devnet
+        run: solana config set --url devnet
 
       # CI has no committed program keypair; cache may restore a different key than declare_id!.
       - name: Build Anchor programs

@@ -7,3 +7,7 @@ test-ledger
 .yarn
 .surfpool
 .env
+keys
+target/
+dist/
+.log

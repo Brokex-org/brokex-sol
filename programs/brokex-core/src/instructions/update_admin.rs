@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use crate::state::*;
 use crate::constants::*;
-use crate::error::BrokexError;
+use crate::error::CoreError;
 
 #[derive(Accounts)]
 pub struct ProposeAdmin<'info> {
@@ -9,7 +9,7 @@ pub struct ProposeAdmin<'info> {
         mut,
         seeds = [CONFIG_SEED],
         bump,
-        constraint = config.admin == admin.key() @ BrokexError::Unauthorized
+        constraint = config.admin == admin.key() @ CoreError::Unauthorized
     )]
     pub config: Account<'info, ProtocolConfig>,
     
@@ -30,7 +30,7 @@ pub struct AcceptAdmin<'info> {
         mut,
         seeds = [CONFIG_SEED],
         bump,
-        constraint = config.pending_admin == Some(pending_admin.key()) @ BrokexError::Unauthorized
+        constraint = config.pending_admin == Some(pending_admin.key()) @ CoreError::Unauthorized
     )]
     pub config: Account<'info, ProtocolConfig>,
     
@@ -39,7 +39,7 @@ pub struct AcceptAdmin<'info> {
 
 pub fn accept_handler(ctx: Context<AcceptAdmin>) -> Result<()> {
     let config = &mut ctx.accounts.config;
-    config.admin = config.pending_admin.ok_or(BrokexError::PendingAdminNotSet)?;
+    config.admin = config.pending_admin.ok_or(CoreError::PendingAdminNotSet)?;
     config.pending_admin = None;
     
     msg!("New admin accepted: {}", config.admin);

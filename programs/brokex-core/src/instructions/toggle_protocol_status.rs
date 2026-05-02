@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use crate::state::*;
 use crate::constants::*;
-use crate::error::BrokexError;
+use crate::error::CoreError;
 
 #[derive(Accounts)]
 pub struct ToggleProtocolStatus<'info> {
@@ -9,7 +9,7 @@ pub struct ToggleProtocolStatus<'info> {
         mut,
         seeds = [CONFIG_SEED],
         bump,
-        constraint = config.admin == admin.key() @ BrokexError::Unauthorized
+        constraint = config.admin == admin.key() @ CoreError::Unauthorized
     )]
     pub config: Account<'info, ProtocolConfig>,
     

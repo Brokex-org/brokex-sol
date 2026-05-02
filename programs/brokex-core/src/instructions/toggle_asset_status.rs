@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use crate::state::*;
 use crate::constants::*;
-use crate::error::BrokexError;
+use crate::error::CoreError;
 
 #[derive(Accounts)]
 pub struct ToggleAssetStatus<'info> {
@@ -15,7 +15,7 @@ pub struct ToggleAssetStatus<'info> {
     #[account(
         seeds = [CONFIG_SEED],
         bump,
-        constraint = config.admin == admin.key() @ BrokexError::Unauthorized
+        constraint = config.admin == admin.key() @ CoreError::Unauthorized
     )]
     pub config: Account<'info, ProtocolConfig>,
     

@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 #[error_code]
-pub enum BrokexError {
+pub enum CoreError {
     #[msg("Unauthorized access")]
     Unauthorized,
     #[msg("Protocol is paused")]

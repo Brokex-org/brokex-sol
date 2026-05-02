@@ -14,4 +14,10 @@ pub enum CoreError {
     Overflow,
     #[msg("No pending admin found")]
     PendingAdminNotSet,
+    #[msg("Price is stale")]
+    StalePrice,
+    #[msg("Price is invalid or negative")]
+    InvalidPrice,
+    #[msg("Confidence interval too wide")]
+    ConfidenceTooWide,
 }

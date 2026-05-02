@@ -9,10 +9,10 @@ pub use constants::*;
 pub use instructions::*;
 pub use state::*;
 
-declare_id!("7DPzhH46ojNiQLfrQMZ3CTpBQR6mGAzzGvEUVMwEPNMy");
+declare_id!("4fgPnwcAxYT3QAutMSLPMNczp4fPugTZYotdmZGsy6sR");
 
 #[program]
-pub mod brokex_solana {
+pub mod brokex_vault {
     use super::*;
 
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {

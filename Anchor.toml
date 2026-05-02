@@ -1,14 +1,17 @@
 [toolchain]
-package_manager = "yarn"
 anchor_version = "1.0.1"
-
+package_manager = "yarn"
 
 [features]
 resolution = true
 skip-lint = false
 
+[programs.devnet]
+brokex-solana = "7DPzhH46ojNiQLfrQMZ3CTpBQR6mGAzzGvEUVMwEPNMy"
+
 [programs.localnet]
-brokex_solana = "7DPzhH46ojNiQLfrQMZ3CTpBQR6mGAzzGvEUVMwEPNMy"
+brokex-vault = "4fgPnwcAxYT3QAutMSLPMNczp4fPugTZYotdmZGsy6sR"
+brokex_solana = "6Ymggvkuy7Yw4TvnjMKfMw1DCs9oguKrQfVzvHSyMP4S"
 
 [provider]
 cluster = "localnet"
@@ -18,7 +21,3 @@ wallet = "~/.config/solana/id.json"
 test = "cargo test"
 
 [hooks]
-
-
-[programs.devnet]
-brokex-solana = "7DPzhH46ojNiQLfrQMZ3CTpBQR6mGAzzGvEUVMwEPNMy"

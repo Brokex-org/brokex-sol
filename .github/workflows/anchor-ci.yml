@@ -32,6 +32,9 @@ jobs:
           echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
 
       - name: Install Anchor CLI via AVM
+        env:
+          # Cargo’s libgit2 path can fail to fetch public GitHub URLs in CI; use the git CLI.
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: |
           cargo install --git https://github.com/coral-xyz/avm avm --locked --force
           avm install latest

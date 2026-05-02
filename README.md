@@ -9,12 +9,55 @@ On-chain CFD trading protocol built on Solana using Rust and Anchor. This is the
 Brokex operates on a **Book B model** — the protocol vault acts as the direct counterparty for all trades. Prices are sourced from the **Pyth Oracle** (no AMMs, no order books), ensuring execution at real market prices with zero artificial slippage.
 
 Key mechanics:
+
 - Traders speculate on price movements using leverage; each listed asset defines its own minimum and maximum leverage (there is no single protocol-wide maximum)
 - USDC is the sole settlement currency
 - The vault holds all liquidity and dynamically locks capital based on open interest imbalance
 - Spread and funding mechanisms incentivize traders to rebalance the system
+- Core and Vault are separate on-chain programs — trading logic is fully isolated from liquidity management
 
 ---
+
+## Folder Structure
+
+brokex-solana/
+├── programs/
+│ ├── brokex-core/
+│ │ └── src/
+│ │ ├── lib.rs # Core program entry point
+│ │ ├── constants.rs
+│ │ ├── errors.rs
+│ │ ├── state/
+│ │ │ ├── config.rs # Protocol config PDA (admin, paused)
+│ │ │ ├── asset.rs # Per-asset config (Pyth feed, leverage, enabled)
+│ │ │ └── position.rs # Trader position accounts
+│ │ ├── instructions/
+│ │ │ ├── initialize.rs # Initialize protocol config
+│ │ │ ├── add_asset.rs # Register tradable asset
+│ │ │ ├── open_position.rs
+│ │ │ └── close_position.rs
+│ │ └── oracle/
+│ │ └── pyth.rs # Pyth price feed integration
+│ └── brokex-vault/
+│ └── src/
+│ ├── lib.rs # Vault program entry point
+│ ├── errors.rs
+│ ├── state/
+│ │ └── vault.rs # Vault state PDA
+│ └── instructions/
+│ ├── initialize.rs # Initialize vault
+│ ├── deposit.rs # Admin deposit USDC
+│ ├── withdraw.rs # Admin withdraw USDC
+│ └── settle.rs # CPI target — pay/receive from Core
+├── tests/ # Anchor integration tests
+├── scripts/
+│ └── set-program-id.sh # Auto-injects program IDs into lib.rs and Anchor.toml
+├── docs/
+├── .env.example
+├── Anchor.toml
+├── Cargo.toml
+├── CONTRIBUTION.md
+└── package.json
 
 ## Prerequisites
 
@@ -59,16 +102,17 @@ solana-keygen new --outfile ~/.config/solana/id.json
 solana airdrop 2
 ```
 
-### 5. Build the program
+### 5. Build both program
 
 ```bash
 anchor build
 ```
 
-### 6. Get your Program ID
+### 6. Get your Program IDs
 
 ```bash
-solana address -k target/deploy/brokex-keypair.json
+solana address -k target/deploy/brokex_core-keypair.json
+solana address -k target/deploy/brokex_vault-keypair.json
 ```
 
 Update `declare_id!()` in `programs/brokex/src/lib.rs` and `[programs.devnet]` in `Anchor.toml` with this value.
@@ -79,19 +123,38 @@ Update `declare_id!()` in `programs/brokex/src/lib.rs` and `[programs.devnet]` i
 anchor deploy --provider.cluster devnet
 ```
 
+Both programs will be deployed. Confirm with:
+
+```bash
+solana program show --programs
+```
+
 ---
 
 ## Environment Variables
 
 ```env
+# Solana Network
 ANCHOR_PROVIDER_URL=https://api.devnet.solana.com
 ANCHOR_WALLET=~/.config/solana/id.json
-PROGRAM_ID=
 
-# Pyth devnet price feed addresses
+# Program IDs
+CORE_PROGRAM_ID=
+VAULT_PROGRAM_ID=
+
+# Pyth Devnet Price Feeds
 PYTH_SOL_USD=H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG
 PYTH_BTC_USD=GVXRSBjFk6e909Wjy64QnbB1W3ToS4RCgbkqXEbBKVGA
 PYTH_ETH_USD=EdVCmQ9FSPcVe5YySXDPCRmc8aDQLKJ9xvYBMZPie1Vw
+PYTH_EUR_USD=42amVS4KgzR9rA28tkVYqVXjq9Qa8dcZQMbH5EYFX6XC
+PYTH_XAU_USD=AtRCZhwikbMsDAEYgwHFuBzGQuRQUMAfYomMaKnkEGRS
+
+# USDC Mint (Devnet)
+USDC_MINT=4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU
+
+# Keeper Bot
+KEEPER_KEYPAIR=~/.config/solana/keeper.json
+KEEPER_INTERVAL_MS=5000
 ```
 
 > **Never commit your `.env` or wallet keypair file.**
@@ -120,26 +183,33 @@ anchor test --provider.cluster devnet
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Smart contracts | Rust + Anchor |
-| Oracle | Pyth Network |
-| Settlement token | USDC (SPL) |
-| Off-chain keeper | TypeScript + @solana/web3.js |
-| Testing | solana-program-test + Anchor TS client |
-| Network | Solana (Devnet → Mainnet) |
+| Layer            | Technology                             |
+| ---------------- | -------------------------------------- |
+| Smart contracts  | Rust + Anchor                          |
+| Oracle           | Pyth Network                           |
+| Settlement token | USDC (SPL)                             |
+| Off-chain keeper | TypeScript + @solana/web3.js           |
+| Testing          | solana-program-test + Anchor TS client |
+| Network          | Solana (Devnet → Mainnet)              |
 
 ---
 
 ## Protocol Architecture
 
-### Vault
-The vault holds all USDC liquidity and is the counterparty for every trade. LPs deposit USDC and receive LP shares (SPL tokens). LP token price reflects real-time trader PnL exposure: `vault value = USDC balance − unrealized trader PnL`.
+### Two-Program Design
+
+The protocol is split into two independently deployable programs:
+
+`brokex-core` handles all trading logic — protocol initialization, asset registry, oracle price reads, position lifecycle (open and close), and PnL computation. It temporarily holds trader collateral during an open position.
+
+`brokex-vault` manages all USDC liquidity. It pays traders when they profit and collects funds when traders lose. In the current phase, liquidity is provided by the admin only. Core settles trades by calling Vault via CPI (Cross-Program Invocation).
 
 ### Oracle
+
 All trade execution uses Pyth price feeds directly — no AMM formula. Price confidence intervals and staleness are validated on every instruction.
 
 ### Imbalance & Alpha
+
 The protocol tracks long and short open interest per asset. Imbalance is measured as:
 
 ```
@@ -156,11 +226,30 @@ needLock = max(longSideRisk, shortSideRisk) * alpha
 Trades are rejected if the resulting `needLock` exceeds available vault capital.
 
 ### Spread & Funding
+
 - **Spread**: Traders opening on the dominant side receive worse pricing; the weaker side gets better pricing.
 - **Funding**: Paid to the protocol (not peer-to-peer). Higher imbalance contribution = higher funding rate.
 
 ### Emergency Mode
+
 A circuit breaker that halts trading, disables new orders, and allows traders to recover margins. No PnL is calculated in emergency mode.
+
+---
+
+## Position Lifecycle
+
+- Admin initializes protocol (Core + Vault)
+- Admin deposits USDC liquidity → Vault
+- User opens position → Core (collateral transferred, entry price recorded)
+- User closes position → Core reads exit price → PnL computed → Vault settles
+
+## PnL & Settlement
+
+- Long: profit if price rises, loss if price falls
+- Short: profit if price falls, loss if price rises
+- Profitable: trader receives collateral + profit paid from Vault
+- Loss: loss deducted from collateral, sent to Vault, remainder returned
+- Full loss: entire collateral transferred to Vault
 
 ---
 

@@ -1,5 +1,7 @@
 [toolchain]
 package_manager = "yarn"
+anchor_version = "1.0.1"
+
 
 [features]
 resolution = true
@@ -16,3 +18,7 @@ wallet = "~/.config/solana/id.json"
 test = "cargo test"
 
 [hooks]
+
+
+[programs.devnet]
+brokex-solana = "7DPzhH46ojNiQLfrQMZ3CTpBQR6mGAzzGvEUVMwEPNMy"

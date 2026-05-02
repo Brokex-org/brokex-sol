@@ -1,0 +1,53 @@
+name: Anchor CI
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - name: Install Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+      - name: Install Anchor CLI via AVM
+        run: |
+          cargo install --git https://github.com/coral-xyz/avm avm --locked --force
+          avm install latest
+          avm use latest
+
+      - name: Install Node dependencies
+        run: yarn install
+
+      - name: Generate keypair for CI
+        run: solana-keygen new --no-bip39-passphrase --outfile ~/.config/solana/id.json
+
+      - name: Set Solana cluster to devnet
+        run: solana config set --url devnet
+
+      - name: Build Anchor program
+        run: anchor build
+
+      - name: Run tests
+        run: anchor test --skip-deploy

@@ -9,7 +9,7 @@ On-chain CFD trading protocol built on Solana using Rust and Anchor. This is the
 Brokex operates on a **Book B model** — the protocol vault acts as the direct counterparty for all trades. Prices are sourced from the **Pyth Oracle** (no AMMs, no order books), ensuring execution at real market prices with zero artificial slippage.
 
 Key mechanics:
-- Traders speculate on price movements using leverage (up to 100x)
+- Traders speculate on price movements using leverage; each listed asset defines its own minimum and maximum leverage (there is no single protocol-wide maximum)
 - USDC is the sole settlement currency
 - The vault holds all liquidity and dynamically locks capital based on open interest imbalance
 - Spread and funding mechanisms incentivize traders to rebalance the system

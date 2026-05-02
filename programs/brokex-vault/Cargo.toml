@@ -21,9 +21,16 @@ custom-panic = []
 
 
 [dependencies]
-anchor-lang = "1.0.1"
-anchor-spl = "1.0.1"
+anchor-lang = { workspace = true }
+anchor-spl = { workspace = true }
 
+
+[dev-dependencies]
+litesvm = "0.10.0"
+anchor-litesvm = "=0.4.0"
+litesvm-utils = "0.4.0"
+spl-token = { version = "9.0.0", features = ["no-entrypoint"] }
+spl-associated-token-account = { version = "8.0.0", features = ["no-entrypoint"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

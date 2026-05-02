@@ -6,8 +6,8 @@
  *
  * Provider wallet is `Anchor.toml` `[provider].wallet` (repo `keys/localnet-authority.json`).
  */
-import * as anchor from "@coral-xyz/anchor";
-import { Program, BN, AnchorError } from "@coral-xyz/anchor";
+import * as anchor from "@anchor-lang/core";
+import { Program, BN, AnchorError } from "@anchor-lang/core";
 import { expect } from "chai";
 import {
   Keypair,
@@ -494,6 +494,25 @@ describe("brokex_vault", () => {
         expect.fail("expected InsufficientBalance");
       } catch (e) {
         expectAnchorCode(e, "InsufficientBalance");
+      }
+    });
+
+    it("settle — profit and loss both non-zero → InvalidVaultValue", async () => {
+      try {
+        await program.methods
+          .settle(new BN(1_000_000), new BN(1_000_000))
+          .accountsPartial({
+            caller: core.publicKey,
+            vaultToken: vaultTokenAta,
+            traderToken: traderAta,
+            coreCollateralToken: coreCollateralAta,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([core])
+          .rpc();
+        expect.fail("expected InvalidVaultValue");
+      } catch (e) {
+        expectAnchorCode(e, "InvalidVaultValue");
       }
     });
 

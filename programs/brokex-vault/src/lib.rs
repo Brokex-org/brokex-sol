@@ -7,6 +7,7 @@ use anchor_lang::prelude::*;
 
 pub use constants::*;
 pub use instructions::*;
+pub use state::*;
 
 // `#[derive(Accounts)]` must expand at crate root so generated `__client_accounts_*` matches
 // what `#[program]` imports (`crate::__client_accounts_*`). A nested `mod contexts` breaks that.

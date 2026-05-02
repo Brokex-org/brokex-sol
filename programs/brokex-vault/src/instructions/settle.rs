@@ -6,6 +6,10 @@ use crate::error::ErrorCode;
 
 pub fn settle_handler(ctx: Context<VaultSettle>, profit: u64, loss: u64) -> Result<()> {
     require!(!ctx.accounts.vault_state.paused, ErrorCode::Paused);
+    require!(
+        profit == 0 || loss == 0,
+        ErrorCode::InvalidVaultValue
+    );
 
     let bump = ctx.accounts.vault_state.bump;
     let seeds: &[&[u8]] = &[b"vault", &[bump]];

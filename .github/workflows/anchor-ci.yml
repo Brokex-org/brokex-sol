@@ -47,7 +47,9 @@ jobs:
         run: yarn install
 
       - name: Generate keypair for CI
-        run: solana-keygen new --no-bip39-passphrase --outfile ~/.config/solana/id.json
+        run: |
+          mkdir -p keys
+          solana-keygen new --no-bip39-passphrase --outfile keys/localnet-authority.json
 
       - name: Set Solana cluster to devnet
         run: solana config set --url devnet
@@ -58,7 +60,7 @@ jobs:
 
       # Rust unit integration tests
       - name: Run Rust tests
-        run: cargo test --package brokex-solana -- --nocapture
+        run: cargo test --package brokex-core -- --nocapture
 
       # TypeScript integration tests via ts-mocha against local validator
       # anchor test handles: start validator → deploy → run [scripts.test] → stop validator

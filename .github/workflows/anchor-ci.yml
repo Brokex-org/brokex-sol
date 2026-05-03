@@ -52,11 +52,6 @@ jobs:
           mkdir -p target/deploy
           cp deploy/brokex_core-keypair.json deploy/brokex_vault-keypair.json target/deploy/
 
-      - name: Generate keypair for CI
-        run: |
-          mkdir -p keys
-          solana-keygen new --no-bip39-passphrase --outfile keys/localnet-authority.json
-
       - name: Set Solana cluster to devnet
         run: solana config set --url devnet
 

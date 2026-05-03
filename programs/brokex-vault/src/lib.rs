@@ -13,7 +13,7 @@ pub use state::*;
 // what `#[program]` imports (`crate::__client_accounts_*`). A nested `mod contexts` breaks that.
 include!("contexts.rs");
 
-declare_id!("DYG1pqLqLjU7JuZfHqMR8ZfvZtL2XneuaXFaAjwXkrXV");
+declare_id!("AePFV3TeyAkWMSR3YjE7ufkkwo1Mcsm4vUDSgvouqxUK");
 
 #[program]
 pub mod brokex_vault {

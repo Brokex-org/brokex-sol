@@ -435,7 +435,7 @@ dependencies = [
  "ark-std 0.5.0",
  "educe",
  "fnv",
- "hashbrown 0.15.5",
+ "hashbrown 0.15.2",
  "itertools 0.13.0",
  "num-bigint 0.4.6",
  "num-integer",
@@ -554,7 +554,7 @@ dependencies = [
  "ark-std 0.5.0",
  "educe",
  "fnv",
- "hashbrown 0.15.5",
+ "hashbrown 0.15.2",
 ]
 
 [[package]]
@@ -766,8 +766,7 @@ dependencies = [
  "anchor-lang",
  "anchor-litesvm",
  "anchor-spl",
- "spl-associated-token-account",
- "spl-token",
+ "solana-account",
 ]
 
 [[package]]
@@ -1447,9 +1446,9 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.15.5"
+version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
+checksum = "bf151400ff0baff5465007dd2f3e717f3fe502074ca563069ce3a6629d07b289"
 dependencies = [
  "allocator-api2",
 ]

@@ -7,7 +7,7 @@ pub struct InitializeProtocol<'info> {
     #[account(
         init,
         payer = admin,
-        space = ProtocolConfig::LEN,
+        space = 8 + ProtocolConfig::INIT_SPACE,
         seeds = [CONFIG_SEED],
         bump
     )]
@@ -19,11 +19,19 @@ pub struct InitializeProtocol<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn initialize_protocol_handler(ctx: Context<InitializeProtocol>) -> Result<()> {
+pub fn initialize_protocol_handler(
+    ctx: Context<InitializeProtocol>,
+    usdc_mint: Pubkey,
+    vault: Pubkey,
+    vault_program: Pubkey,
+) -> Result<()> {
     let config = &mut ctx.accounts.config;
     config.admin = ctx.accounts.admin.key();
     config.pending_admin = None;
     config.is_paused = false;
+    config.usdc_mint = usdc_mint;
+    config.vault = vault;
+    config.vault_program = vault_program;
     
     msg!("Protocol initialized with admin: {}", config.admin);
     Ok(())

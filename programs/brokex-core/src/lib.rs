@@ -3,6 +3,7 @@ pub mod error;
 pub mod instructions;
 pub mod oracle;
 pub mod state;
+pub mod logic;
 
 use anchor_lang::prelude::*;
 
@@ -16,12 +17,22 @@ declare_id!("61ib5zCCL6Yk2a8j1Z1aG5quMUCUJC5gTJBZ7KLfoWMc");
 pub mod brokex_core {
     use super::*;
 
-    pub fn initialize_protocol(ctx: Context<InitializeProtocol>) -> Result<()> {
-        instructions::initialize_protocol_handler(ctx)
+    pub fn initialize_protocol(
+        ctx: Context<InitializeProtocol>,
+        usdc_mint: Pubkey,
+        vault: Pubkey,
+        vault_program: Pubkey,
+    ) -> Result<()> {
+        instructions::initialize_protocol_handler(ctx, usdc_mint, vault, vault_program)
     }
 
-    pub fn add_asset(ctx: Context<AddAsset>, asset_id: String, pyth_feed: Pubkey) -> Result<()> {
-        instructions::add_asset_handler(ctx, asset_id, pyth_feed)
+    pub fn add_asset(
+        ctx: Context<AddAsset>,
+        asset_id: String,
+        pyth_feed: Pubkey,
+        config_input: AssetConfigInput,
+    ) -> Result<()> {
+        instructions::add_asset_handler(ctx, asset_id, pyth_feed, config_input)
     }
 
     pub fn toggle_asset_status(ctx: Context<ToggleAssetStatus>, is_enabled: bool) -> Result<()> {
@@ -38,5 +49,17 @@ pub mod brokex_core {
 
     pub fn accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
         instructions::accept_handler(ctx)
+    }
+
+    pub fn open_position(
+        ctx: Context<OpenPosition>,
+        asset_id: String,
+        collateral: u64,
+        leverage: u8,
+        direction: PositionDirection,
+        sl_price: u64,
+        tp_price: u64,
+    ) -> Result<()> {
+        instructions::open_position_handler(ctx, asset_id, collateral, leverage, direction, sl_price, tp_price)
     }
 }

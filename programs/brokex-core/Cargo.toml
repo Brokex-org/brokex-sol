@@ -25,8 +25,8 @@ anchor-spl = { workspace = true }
 
 [dev-dependencies]
 anchor-litesvm = "0.4.0"
-spl-token = { version = "9.0.0", features = ["no-entrypoint"] }
-spl-associated-token-account = { version = "8.0.0", features = ["no-entrypoint"] }
+solana-account = "3.4.0"
+
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

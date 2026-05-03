@@ -26,4 +26,10 @@ pub enum CoreError {
     FeedIdMismatch,
     #[msg("Invalid oracle account owner")]
     InvalidOracleOwner,
+    #[msg("Trade size too small")]
+    TradeSizeTooSmall,
+    #[msg("Max open interest exceeded for this asset")]
+    MaxOIExceeded,
+    #[msg("Max open interest per trader exceeded")]
+    MaxTraderOIExceeded,
 }

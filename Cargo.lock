@@ -767,6 +767,8 @@ dependencies = [
  "anchor-litesvm",
  "anchor-spl",
  "solana-account",
+ "spl-associated-token-account",
+ "spl-token",
 ]
 
 [[package]]

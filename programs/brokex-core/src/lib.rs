@@ -1,6 +1,7 @@
 pub mod constants;
 pub mod error;
 pub mod instructions;
+pub mod oracle;
 pub mod state;
 
 use anchor_lang::prelude::*;
@@ -12,7 +13,7 @@ pub use state::*;
 declare_id!("9bPWLjPxqR78kR63YokXeQ8k1nLDHfagh4W2117vjyWu");
 
 #[program]
-pub mod brokex_solana {
+pub mod brokex_core {
     use super::*;
 
     pub fn initialize_protocol(ctx: Context<InitializeProtocol>) -> Result<()> {

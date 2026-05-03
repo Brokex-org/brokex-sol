@@ -3,12 +3,16 @@
   "scripts": {
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
     "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check",
-    "test:anchor": "anchor test --validator legacy"
+    "check:rust": "cargo check -p brokex-core -p brokex-vault",
+    "test:rust": "cargo test --workspace -- --nocapture",
+    "test:rust:litesvm": "yarn prep:program-keys && anchor build && cargo test --workspace --features litesvm-integration -- --nocapture",
+    "prep:program-keys": "mkdir -p target/deploy && cp deploy/brokex_core-keypair.json deploy/brokex_vault-keypair.json target/deploy/",
+    "test:anchor": "yarn prep:program-keys && anchor build && anchor test --skip-build --validator legacy"
   },
   "dependencies": {
-    "@coral-xyz/anchor": "^0.31.0",
-    "@solana/web3.js": "^1.98.2",
-    "@solana/spl-token": "^0.4.9"
+    "@anchor-lang/core": "^1.0.1",
+    "@solana/spl-token": "^0.4.9",
+    "@solana/web3.js": "^1.98.2"
   },
   "devDependencies": {
     "chai": "^4.3.4",

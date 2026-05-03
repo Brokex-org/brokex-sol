@@ -120,8 +120,7 @@ pub fn open_position_handler(
     let new_oi_long = asset.oi_long + if direction == PositionDirection::Long { oi } else { 0 };
     let new_oi_short = asset.oi_short + if direction == PositionDirection::Short { oi } else { 0 };
 
-    require!(new_oi_long + new_oi_short <= asset.max_open_interest, CoreError::Overflow);
-    // TODO: Trader-specific OI tracking if needed
+    require!(new_oi_long + new_oi_short <= asset.max_open_interest, CoreError::MaxOIExceeded);
 
     // Check Alpha-Scaling / Vault Capital
     let old_need_lock = logic::calculate_need_lock(asset.risk_long, asset.risk_short, asset.alpha_min, asset.alpha_scale);

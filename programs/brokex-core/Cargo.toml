@@ -14,7 +14,7 @@ default = []
 # LiteSVM tests load `target/deploy/*.so` — run `yarn test:rust:litesvm` or `prep:program-keys` + `anchor build` first.
 litesvm-integration = []
 cpi = ["no-entrypoint"]
-no-entrypoint = ["anchor-lang/no-entrypoint", "anchor-spl/no-entrypoint"]
+no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]

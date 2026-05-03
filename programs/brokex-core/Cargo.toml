@@ -3,6 +3,7 @@ name = "brokex-core"
 version = "0.1.0"
 description = "Created with Anchor"
 edition = "2021"
+autotests = false
 
 [lib]
 crate-type = ["cdylib", "lib"]
@@ -10,8 +11,10 @@ name = "brokex_core"
 
 [features]
 default = []
+# LiteSVM tests load `target/deploy/*.so` — run `yarn test:rust:litesvm` or `prep:program-keys` + `anchor build` first.
+litesvm-integration = []
 cpi = ["no-entrypoint"]
-no-entrypoint = []
+no-entrypoint = ["anchor-lang/no-entrypoint", "anchor-spl/no-entrypoint"]
 no-idl = []
 no-log-ix-name = []
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
@@ -29,6 +32,19 @@ spl-associated-token-account = { version = "8.0.0", features = ["no-entrypoint"]
 anchor-litesvm = "0.4.0"
 solana-account = "3.4.0"
 
+[[test]]
+name = "test_oracle"
+path = "tests/test_oracle.rs"
+
+[[test]]
+name = "test_protocol"
+path = "tests/test_protocol.rs"
+required-features = ["litesvm-integration"]
+
+[[test]]
+name = "test_trade"
+path = "tests/test_trade.rs"
+required-features = ["litesvm-integration"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

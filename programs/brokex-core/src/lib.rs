@@ -39,7 +39,10 @@ pub mod brokex_core {
         instructions::toggle_asset_handler(ctx, is_enabled)
     }
 
-    pub fn toggle_protocol_status(ctx: Context<ToggleProtocolStatus>, is_paused: bool) -> Result<()> {
+    pub fn toggle_protocol_status(
+        ctx: Context<ToggleProtocolStatus>,
+        is_paused: bool,
+    ) -> Result<()> {
         instructions::toggle_protocol_handler(ctx, is_paused)
     }
 

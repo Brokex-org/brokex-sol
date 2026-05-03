@@ -1,10 +1,22 @@
-use anchor_litesvm::{AnchorLiteSVM, AnchorContext, Signer};
+use anchor_litesvm::{AnchorContext, AnchorLiteSVM, Signer};
 use anchor_lang::{
     prelude::Pubkey,
     solana_program::instruction::Instruction,
     InstructionData, ToAccountMetas,
 };
 use brokex_core::{constants::*, state::*};
+use std::path::PathBuf;
+
+fn brokex_core_elf() -> &'static [u8] {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/brokex_core.so");
+    let data = std::fs::read(&path).unwrap_or_else(|e| {
+        panic!(
+            "missing {} — run `yarn prep:program-keys && anchor build` from the repo root (or `yarn test:rust:litesvm`): {e}",
+            path.display()
+        )
+    });
+    Box::leak(data.into_boxed_slice())
+}
 
 fn send_ix(ctx: &mut AnchorContext, ix: Instruction, admin: &anchor_litesvm::Keypair) {
     ctx.execute_instruction(ix, &[admin])
@@ -15,22 +27,20 @@ fn send_ix(ctx: &mut AnchorContext, ix: Instruction, admin: &anchor_litesvm::Key
 #[test]
 fn test_protocol_flow() {
     let program_id = brokex_core::id();
-    let bytes = include_bytes!("../../../target/deploy/brokex_core.so");
+    let bytes = brokex_core_elf();
 
     let mut ctx = AnchorLiteSVM::build_with_program(program_id, bytes);
-    
-    // Create and fund a new admin keypair to avoid borrow conflicts
+
     let admin = anchor_litesvm::Keypair::new();
     ctx.airdrop(&admin.pubkey(), 10_000_000_000).unwrap();
 
-    // 1. Initialize Protocol
     let (config_pda, _) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
     let init_ix = Instruction {
         program_id,
         accounts: brokex_core::accounts::InitializeProtocol {
             admin: admin.pubkey(),
             config: config_pda,
-            system_program: Pubkey::default(),
+            system_program: anchor_lang::solana_program::system_program::ID,
         }
         .to_account_metas(None),
         data: brokex_core::instruction::InitializeProtocol {
@@ -41,17 +51,17 @@ fn test_protocol_flow() {
     };
     send_ix(&mut ctx, init_ix, &admin);
 
-    // 2. Add Asset
     let asset_id = "BTC/USD".to_string();
     let pyth_feed = Pubkey::new_unique();
-    let (asset_pda, _) = Pubkey::find_program_address(&[ASSET_SEED, asset_id.as_bytes()], &program_id);
+    let (asset_pda, _) =
+        Pubkey::find_program_address(&[ASSET_SEED, asset_id.as_bytes()], &program_id);
     let add_asset_ix = Instruction {
         program_id,
         accounts: brokex_core::accounts::AddAsset {
             admin: admin.pubkey(),
             config: config_pda,
             asset: asset_pda,
-            system_program: Pubkey::default(),
+            system_program: anchor_lang::solana_program::system_program::ID,
         }
         .to_account_metas(None),
         data: brokex_core::instruction::AddAsset {
@@ -75,7 +85,6 @@ fn test_protocol_flow() {
     };
     send_ix(&mut ctx, add_asset_ix, &admin);
 
-    // 3. Toggle Asset Status
     let toggle_asset_ix = Instruction {
         program_id,
         accounts: brokex_core::accounts::ToggleAssetStatus {
@@ -88,7 +97,6 @@ fn test_protocol_flow() {
     };
     send_ix(&mut ctx, toggle_asset_ix, &admin);
 
-    // 4. Toggle Protocol Status
     let toggle_protocol_ix = Instruction {
         program_id,
         accounts: brokex_core::accounts::ToggleProtocolStatus {
@@ -100,7 +108,6 @@ fn test_protocol_flow() {
     };
     send_ix(&mut ctx, toggle_protocol_ix, &admin);
 
-    // Verify final state
     let config_data: ProtocolConfig = ctx.get_account(&config_pda).expect("config not found");
     assert!(config_data.is_paused);
 }

@@ -1,4 +1,4 @@
-//! Vault integration tests (LiteSVM). Requires `anchor build` so `brokex_vault.so` exists.
+//! Vault integration tests (LiteSVM). Needs `target/deploy/brokex_vault.so` from `yarn prep:program-keys && anchor build` (or `yarn test:rust:litesvm`).
 use anchor_lang::{
     prelude::Pubkey,
     solana_program::{instruction::Instruction, system_program},
@@ -7,12 +7,17 @@ use anchor_lang::{
 use anchor_litesvm::{AnchorContext, AnchorLiteSVM, Signer};
 use brokex_vault::{accounts as vault_accounts, instruction as vault_ix, state::VaultState};
 use litesvm_utils::{AssertionHelpers, TestHelpers, TransactionResult};
+use std::path::PathBuf;
 
 fn program_bytes() -> &'static [u8] {
-    include_bytes!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../target/deploy/brokex_vault.so"
-    ))
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/brokex_vault.so");
+    let data = std::fs::read(&path).unwrap_or_else(|e| {
+        panic!(
+            "missing {} — run `yarn prep:program-keys && anchor build` from the repo root (or `yarn test:rust:litesvm`): {e}",
+            path.display()
+        )
+    });
+    Box::leak(data.into_boxed_slice())
 }
 
 fn program_id() -> Pubkey {

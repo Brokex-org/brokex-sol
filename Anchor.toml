@@ -7,12 +7,12 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-brokex-core = "9bPWLjPxqR78kR63YokXeQ8k1nLDHfagh4W2117vjyWu"
-brokex-vault = "4fgPnwcAxYT3QAutMSLPMNczp4fPugTZYotdmZGsy6sR"
+brokex-core = "7yRpue4276YpzxgF3bTTUfTTUbtVArjDYbbYxYBWV8Ys"
+brokex-vault = "AePFV3TeyAkWMSR3YjE7ufkkwo1Mcsm4vUDSgvouqxUK"
 
 [programs.localnet]
-brokex-vault = "4fgPnwcAxYT3QAutMSLPMNczp4fPugTZYotdmZGsy6sR"
-brokex-core = "9bPWLjPxqR78kR63YokXeQ8k1nLDHfagh4W2117vjyWu"
+brokex-vault = "AePFV3TeyAkWMSR3YjE7ufkkwo1Mcsm4vUDSgvouqxUK"
+brokex-core = "7yRpue4276YpzxgF3bTTUfTTUbtVArjDYbbYxYBWV8Ys"
 
 [provider]
 cluster = "localnet"

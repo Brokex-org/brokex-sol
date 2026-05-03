@@ -10,7 +10,7 @@ pub use constants::*;
 pub use instructions::*;
 pub use state::*;
 
-declare_id!("9bPWLjPxqR78kR63YokXeQ8k1nLDHfagh4W2117vjyWu");
+declare_id!("7yRpue4276YpzxgF3bTTUfTTUbtVArjDYbbYxYBWV8Ys");
 
 #[program]
 pub mod brokex_core {

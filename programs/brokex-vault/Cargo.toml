@@ -3,6 +3,7 @@ name = "brokex-vault"
 version = "0.1.0"
 description = "Created with Anchor"
 edition = "2021"
+autotests = false
 
 [lib]
 crate-type = ["cdylib", "lib"]
@@ -10,6 +11,8 @@ name = "brokex_vault"
 
 [features]
 default = []
+# See brokex-core: LiteSVM tests need `target/deploy/*.so` (`yarn test:rust:litesvm`).
+litesvm-integration = []
 cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []
@@ -31,6 +34,11 @@ anchor-litesvm = "=0.4.0"
 litesvm-utils = "0.4.0"
 spl-token = { version = "9.0.0", features = ["no-entrypoint"] }
 spl-associated-token-account = { version = "8.0.0", features = ["no-entrypoint"] }
+
+[[test]]
+name = "vault_flow"
+path = "tests/vault_flow.rs"
+required-features = ["litesvm-integration"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

@@ -1,22 +1,32 @@
-import * as anchor from "@coral-xyz/anchor";
-import { Program, AnchorProvider } from "@coral-xyz/anchor";
+/**
+ * Integration tests for `brokex-core` (localnet via `anchor test`).
+ * Uses IDL `address` like `tests/brokex_vault.ts` so it stays aligned with `declare_id!`.
+ */
+import * as anchor from "@anchor-lang/core";
+import { Program, AnchorProvider } from "@anchor-lang/core";
 import { Keypair, PublicKey, SystemProgram, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { assert } from "chai";
-import { BrokexCore } from "../target/types/brokex_core";
+import type { BrokexCore } from "../target/types/brokex_core";
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const idl = require("../target/idl/brokex_core.json") as BrokexCore;
 
 const CONFIG_SEED = Buffer.from("config");
-const ASSET_SEED  = Buffer.from("asset");
+const ASSET_SEED = Buffer.from("asset");
 
 describe("brokex-core", () => {
   const provider = AnchorProvider.env();
   anchor.setProvider(provider);
 
-  const program = anchor.workspace.BrokexCore as Program<BrokexCore>;
-  const admin   = provider.wallet;
+  const program = new Program(idl, provider) as Program<BrokexCore>;
+  const admin = provider.wallet;
 
-  const [configPda] = PublicKey.findProgramAddressSync([CONFIG_SEED], program.programId);
+  const [configPda] = PublicKey.findProgramAddressSync(
+    [CONFIG_SEED],
+    program.programId
+  );
 
-  const assetId  = "SOL/USD";
+  const assetId = "SOL/USD";
   const pythFeed = Keypair.generate().publicKey;
   const [assetPda] = PublicKey.findProgramAddressSync(
     [ASSET_SEED, Buffer.from(assetId)],
@@ -26,7 +36,11 @@ describe("brokex-core", () => {
   it("initializes the protocol config", async () => {
     await program.methods
       .initializeProtocol()
-      .accounts({ config: configPda, admin: admin.publicKey, systemProgram: SystemProgram.programId })
+      .accountsPartial({
+        config: configPda,
+        admin: admin.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
       .rpc();
 
     const config = await program.account.protocolConfig.fetch(configPda);
@@ -38,7 +52,12 @@ describe("brokex-core", () => {
   it("registers a new asset", async () => {
     await program.methods
       .addAsset(assetId, pythFeed)
-      .accounts({ asset: assetPda, config: configPda, admin: admin.publicKey, systemProgram: SystemProgram.programId })
+      .accountsPartial({
+        asset: assetPda,
+        config: configPda,
+        admin: admin.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
       .rpc();
 
     const asset = await program.account.asset.fetch(assetPda);
@@ -50,7 +69,11 @@ describe("brokex-core", () => {
   it("disables a registered asset", async () => {
     await program.methods
       .toggleAssetStatus(false)
-      .accounts({ asset: assetPda, config: configPda, admin: admin.publicKey })
+      .accountsPartial({
+        asset: assetPda,
+        config: configPda,
+        admin: admin.publicKey,
+      })
       .rpc();
 
     const asset = await program.account.asset.fetch(assetPda);
@@ -60,7 +83,11 @@ describe("brokex-core", () => {
   it("re-enables a disabled asset", async () => {
     await program.methods
       .toggleAssetStatus(true)
-      .accounts({ asset: assetPda, config: configPda, admin: admin.publicKey })
+      .accountsPartial({
+        asset: assetPda,
+        config: configPda,
+        admin: admin.publicKey,
+      })
       .rpc();
 
     const asset = await program.account.asset.fetch(assetPda);
@@ -70,7 +97,7 @@ describe("brokex-core", () => {
   it("pauses the protocol", async () => {
     await program.methods
       .toggleProtocolStatus(true)
-      .accounts({ config: configPda, admin: admin.publicKey })
+      .accountsPartial({ config: configPda, admin: admin.publicKey })
       .rpc();
 
     const config = await program.account.protocolConfig.fetch(configPda);
@@ -80,7 +107,7 @@ describe("brokex-core", () => {
   it("unpauses the protocol", async () => {
     await program.methods
       .toggleProtocolStatus(false)
-      .accounts({ config: configPda, admin: admin.publicKey })
+      .accountsPartial({ config: configPda, admin: admin.publicKey })
       .rpc();
 
     const config = await program.account.protocolConfig.fetch(configPda);
@@ -92,11 +119,13 @@ describe("brokex-core", () => {
 
     await program.methods
       .proposeAdmin(newAdmin.publicKey)
-      .accounts({ config: configPda, admin: admin.publicKey })
+      .accountsPartial({ config: configPda, admin: admin.publicKey })
       .rpc();
 
     const config = await program.account.protocolConfig.fetch(configPda);
-    assert.equal(config.pendingAdmin.toBase58(), newAdmin.publicKey.toBase58());
+    const pending = config.pendingAdmin;
+    if (pending === null) assert.fail("expected pendingAdmin after propose");
+    assert.equal(pending.toBase58(), newAdmin.publicKey.toBase58());
     assert.equal(config.admin.toBase58(), admin.publicKey.toBase58());
   });
 
@@ -105,15 +134,18 @@ describe("brokex-core", () => {
 
     await program.methods
       .proposeAdmin(newAdmin.publicKey)
-      .accounts({ config: configPda, admin: admin.publicKey })
+      .accountsPartial({ config: configPda, admin: admin.publicKey })
       .rpc();
 
-    const sig = await provider.connection.requestAirdrop(newAdmin.publicKey, LAMPORTS_PER_SOL);
+    const sig = await provider.connection.requestAirdrop(
+      newAdmin.publicKey,
+      LAMPORTS_PER_SOL
+    );
     await provider.connection.confirmTransaction(sig, "confirmed");
 
     await program.methods
       .acceptAdmin()
-      .accounts({ config: configPda, pendingAdmin: newAdmin.publicKey })
+      .accountsPartial({ config: configPda, pendingAdmin: newAdmin.publicKey })
       .signers([newAdmin])
       .rpc();
 
@@ -124,21 +156,27 @@ describe("brokex-core", () => {
 
   it("rejects toggle_protocol_status from a non-admin", async () => {
     const rogue = Keypair.generate();
-    const sig = await provider.connection.requestAirdrop(rogue.publicKey, LAMPORTS_PER_SOL);
+    const sig = await provider.connection.requestAirdrop(
+      rogue.publicKey,
+      LAMPORTS_PER_SOL
+    );
     await provider.connection.confirmTransaction(sig, "confirmed");
 
     try {
       await program.methods
         .toggleProtocolStatus(true)
-        .accounts({ config: configPda, admin: rogue.publicKey })
+        .accountsPartial({ config: configPda, admin: rogue.publicKey })
         .signers([rogue])
         .rpc();
 
       assert.fail("Expected transaction to be rejected");
-    } catch (err: any) {
-      const msg: string = err.message ?? err.toString();
+    } catch (err: unknown) {
+      const msg: string =
+        err instanceof Error ? err.message : String(err);
       assert.ok(
-        msg.includes("Unauthorized") || msg.includes("2000") || msg.includes("constraint"),
+        msg.includes("Unauthorized") ||
+          msg.includes("2000") ||
+          msg.includes("constraint"),
         `Unexpected error: ${msg}`
       );
     }

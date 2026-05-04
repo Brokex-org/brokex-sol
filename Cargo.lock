@@ -766,6 +766,7 @@ dependencies = [
  "anchor-lang",
  "anchor-litesvm",
  "anchor-spl",
+ "solana-account",
  "spl-associated-token-account",
  "spl-token",
 ]

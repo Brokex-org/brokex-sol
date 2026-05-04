@@ -43,7 +43,11 @@ fn test_protocol_flow() {
             system_program: anchor_lang::solana_program::system_program::ID,
         }
         .to_account_metas(None),
-        data: brokex_core::instruction::InitializeProtocol.data(),
+        data: brokex_core::instruction::InitializeProtocol {
+            usdc_mint: Pubkey::new_unique(),
+            vault: Pubkey::new_unique(),
+            vault_program: Pubkey::new_unique(),
+        }.data(),
     };
     send_ix(&mut ctx, init_ix, &admin);
 
@@ -63,6 +67,19 @@ fn test_protocol_flow() {
         data: brokex_core::instruction::AddAsset {
             asset_id: asset_id.clone(),
             pyth_feed,
+            config_input: brokex_core::instructions::AssetConfigInput {
+                min_leverage: 1,
+                max_leverage: 100,
+                min_trade_size: 0,
+                commission_open_bps: 0,
+                base_spread_bps: 0,
+                max_open_interest: 1_000_000_000,
+                max_oi_per_trader: 1_000_000_000,
+                alpha_min: 0,
+                alpha_scale: 0,
+                k: 1,
+                profit_cap_bps: 10000,
+            }
         }
         .data(),
     };

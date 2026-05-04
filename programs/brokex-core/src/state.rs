@@ -6,6 +6,9 @@ pub struct ProtocolConfig {
     pub admin: Pubkey,
     pub is_paused: bool,
     pub pending_admin: Option<Pubkey>,
+    pub usdc_mint: Pubkey,
+    pub vault: Pubkey,
+    pub vault_program: Pubkey, // Address of brokex-vault program for CPIs
 }
 
 #[account]
@@ -15,13 +18,57 @@ pub struct Asset {
     pub asset_id: String,
     pub pyth_feed: Pubkey,
     pub is_enabled: bool,
+
+    // Config 
+    pub min_leverage: u64,
+    pub max_leverage: u64,
+    pub min_trade_size: u64,
+    pub commission_open_bps: u64,
+    pub base_spread_bps: u64,
+    pub max_open_interest: u64,
+    pub max_oi_per_trader: u64,
+    
+    // Risk Parameters (Alpha/K)
+    pub alpha_min: u64,
+    pub alpha_scale: u64,
+    pub k: u64,
+    pub profit_cap_bps: u64,
+
+    // State 
+    pub oi_long: u64,
+    pub oi_short: u64,
+    pub risk_long: u64,
+    pub risk_short: u64,
+    pub sum_priced_oi_long: u128,  // sum of (OI * price)
+    pub sum_priced_oi_short: u128,
 }
 
-impl ProtocolConfig {
-    pub const LEN: usize = 8 + 32 + 1 + (1 + 32); // discriminator + pubkey + bool + Option<Pubkey>
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
+pub enum PositionDirection {
+    Long,
+    Short,
 }
 
-impl Asset {
-    pub const MAX_ASSET_ID_LEN: usize = 32;
-    pub const LEN: usize = 8 + (4 + 32) + 32 + 1; // discriminator + string(max 32) + pubkey + bool
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
+pub enum PositionState {
+    Open,
+    Closed,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct Position {
+    pub trader: Pubkey,
+    #[max_len(32)]
+    pub asset_id: String,
+    pub direction: PositionDirection,
+    pub collateral: u64,
+    pub leverage: u8,
+    pub size: u64,
+    pub entry_price: u64,
+    pub liquidation_price: u64,
+    pub lp_locked_capital: u64,
+    pub state: PositionState,
+    pub open_time: i64,
+    pub bump: u8,
 }

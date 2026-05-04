@@ -25,11 +25,12 @@ custom-panic = []
 [dependencies]
 anchor-lang = { workspace = true }
 anchor-spl = { workspace = true }
+spl-token = { version = "9.0.0", features = ["no-entrypoint"] }
+spl-associated-token-account = { version = "8.0.0", features = ["no-entrypoint"] }
 
 [dev-dependencies]
 anchor-litesvm = "0.4.0"
-spl-token = { version = "9.0.0", features = ["no-entrypoint"] }
-spl-associated-token-account = { version = "8.0.0", features = ["no-entrypoint"] }
+solana-account = "3.4.0"
 
 [[test]]
 name = "test_oracle"
@@ -38,6 +39,11 @@ path = "tests/test_oracle.rs"
 [[test]]
 name = "test_protocol"
 path = "tests/test_protocol.rs"
+required-features = ["litesvm-integration"]
+
+[[test]]
+name = "test_trade"
+path = "tests/test_trade.rs"
 required-features = ["litesvm-integration"]
 
 [lints.rust]

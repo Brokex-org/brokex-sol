@@ -4,3 +4,5 @@ use anchor_lang::prelude::*;
 pub const CONFIG_SEED: &[u8] = b"config";
 #[constant]
 pub const ASSET_SEED: &[u8] = b"asset";
+#[constant]
+pub const POSITION_SEED: &[u8] = b"position";

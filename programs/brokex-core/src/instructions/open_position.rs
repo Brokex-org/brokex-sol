@@ -74,7 +74,11 @@ pub fn open_position_handler(
 
     // Basic Validations
     require!(collateral >= asset.min_trade_size, CoreError::InvalidPrice); // Reuse or add error
-    require!(leverage as u64 >= asset.min_leverage && leverage as u64 <= asset.max_leverage, CoreError::Overflow);
+    require!(leverage > 0, CoreError::Overflow); // Ensure leverage is at least 1x
+    require!(
+        leverage as u64 >= asset.min_leverage && leverage as u64 <= asset.max_leverage, 
+        CoreError::Overflow
+    );
 
     // Validate price using the oracle logic
     let oracle_price = oracle::get_validated_price(
@@ -100,9 +104,11 @@ pub fn open_position_handler(
 
     // Calculate Open Interest and Risk
     // Note: Commission is deducted from collateral BEFORE applying leverage.
-    // Size = (Collateral - Commission) * Leverage
+    // Round UP commission to favor the protocol.
     let commission = collateral
         .checked_mul(asset.commission_open_bps)
+        .ok_or(CoreError::Overflow)?
+        .checked_add(9_999)
         .ok_or(CoreError::Overflow)?
         / 10_000;
     
@@ -116,17 +122,30 @@ pub fn open_position_handler(
         .ok_or(CoreError::Overflow)?
         / 10_000;
 
-    // Check Global Limits (OI Cap, Trader Cap, Imbalance)
-    let new_oi_long = asset.oi_long + if direction == PositionDirection::Long { oi } else { 0 };
-    let new_oi_short = asset.oi_short + if direction == PositionDirection::Short { oi } else { 0 };
+    // Ensure the liability (max_profit) is backed by margin if required by risk model
+    // Note: This prevents insolvency where a single trade can bankrupt the pool
+    require!(max_profit <= margin.checked_mul(10).ok_or(CoreError::Overflow)?, CoreError::Overflow); // Example cap
 
-    require!(new_oi_long + new_oi_short <= asset.max_open_interest, CoreError::MaxOIExceeded);
+    // Check Global Limits (OI Cap, Trader Cap, Imbalance)
+    let extra_oi_long = if direction == PositionDirection::Long { oi } else { 0 };
+    let extra_oi_short = if direction == PositionDirection::Short { oi } else { 0 };
+
+    let new_oi_long = asset.oi_long.checked_add(extra_oi_long).ok_or(CoreError::Overflow)?;
+    let new_oi_short = asset.oi_short.checked_add(extra_oi_short).ok_or(CoreError::Overflow)?;
+
+    require!(
+        new_oi_long.checked_add(new_oi_short).ok_or(CoreError::Overflow)? <= asset.max_open_interest, 
+        CoreError::MaxOIExceeded
+    );
 
     // Check Alpha-Scaling / Vault Capital
     let old_need_lock = logic::calculate_need_lock(asset.risk_long, asset.risk_short, asset.alpha_min, asset.alpha_scale);
     
-    let new_risk_long = asset.risk_long + if direction == PositionDirection::Long { max_profit } else { 0 };
-    let new_risk_short = asset.risk_short + if direction == PositionDirection::Short { max_profit } else { 0 };
+    let extra_risk = if direction == PositionDirection::Long { max_profit } else { 0 };
+    let new_risk_long = asset.risk_long.checked_add(extra_risk).ok_or(CoreError::Overflow)?;
+    
+    let extra_risk_short = if direction == PositionDirection::Short { max_profit } else { 0 };
+    let new_risk_short = asset.risk_short.checked_add(extra_risk_short).ok_or(CoreError::Overflow)?;
     
     let new_need_lock = logic::calculate_need_lock(new_risk_long, new_risk_short, asset.alpha_min, asset.alpha_scale);
 
@@ -146,13 +165,23 @@ pub fn open_position_handler(
 
     // Update Asset State
     if direction == PositionDirection::Long {
-        asset.oi_long += oi;
-        asset.risk_long += max_profit;
-        asset.sum_priced_oi_long += (oi as u128) * (entry_price as u128);
+        asset.oi_long = asset.oi_long.checked_add(oi).ok_or(CoreError::Overflow)?;
+        asset.risk_long = asset.risk_long.checked_add(max_profit).ok_or(CoreError::Overflow)?;
+        let priced_oi = (oi as u128)
+            .checked_mul(entry_price as u128)
+            .ok_or(CoreError::Overflow)?;
+        asset.sum_priced_oi_long = asset.sum_priced_oi_long
+            .checked_add(priced_oi)
+            .ok_or(CoreError::Overflow)?;
     } else {
-        asset.oi_short += oi;
-        asset.risk_short += max_profit;
-        asset.sum_priced_oi_short += (oi as u128) * (entry_price as u128);
+        asset.oi_short = asset.oi_short.checked_add(oi).ok_or(CoreError::Overflow)?;
+        asset.risk_short = asset.risk_short.checked_add(max_profit).ok_or(CoreError::Overflow)?;
+        let priced_oi = (oi as u128)
+            .checked_mul(entry_price as u128)
+            .ok_or(CoreError::Overflow)?;
+        asset.sum_priced_oi_short = asset.sum_priced_oi_short
+            .checked_add(priced_oi)
+            .ok_or(CoreError::Overflow)?;
     }
 
     // Store Position

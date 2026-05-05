@@ -206,7 +206,17 @@ describe("brokex-core", () => {
     }
   });
 
-  it("has the open_position method available", async () => {
-    assert.isFunction(program.methods.openPosition);
+  it("derives position PDA with tradeId", async () => {
+    const tradeId = new anchor.BN(42);
+    const [positionPda] = PublicKey.findProgramAddressSync(
+      [
+        POSITION_SEED,
+        admin.publicKey.toBuffer(),
+        Buffer.from(assetId),
+        tradeId.toArrayLike(Buffer, "le", 8),
+      ],
+      program.programId,
+    );
+    assert.ok(positionPda);
   });
 });

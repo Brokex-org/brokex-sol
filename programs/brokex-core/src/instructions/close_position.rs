@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::TokenAccount;
+use anchor_spl::token::{self, Token, TokenAccount};
 use brokex_vault::cpi::{accounts::VaultSettle, settle};
+use brokex_vault::program::BrokexVault;
 use brokex_vault::VaultState;
 
 use crate::constants::*;
@@ -9,14 +10,7 @@ use crate::logic::{self, PRECISION};
 use crate::oracle;
 use crate::state::*;
 
-/// Closes an open position using the same pricing and pool rules as [`open_position`](super::open_position):
-/// exit spread (`apply_spread_close`), PnL vs `entry_price`, LP profit cap, liquidation threshold (EVM-style),
-/// unwind of `Asset` OI/risk (symmetric to open), then vault settlement analogous to EVM `_settleTrade`.
-///
-/// **Funding:** on-chain funding indices are not modeled yet; `funding_fee` is treated as `0` (same structure
-/// as EVM for when it is wired).
-///
-/// **Vault:** `VaultState.core` must be the settlement PDA `Pubkey::find_program_address(&[SETTLEMENT_SEED], id)`.
+/// Closes an open position by the trader themselves.
 #[derive(Accounts)]
 #[instruction(asset_id: String)]
 pub struct ClosePosition<'info> {
@@ -28,7 +22,7 @@ pub struct ClosePosition<'info> {
         bump,
         constraint = !config.is_paused @ CoreError::Paused
     )]
-    pub config: Account<'info, ProtocolConfig>,
+    pub config: Box<Account<'info, ProtocolConfig>>,
 
     #[account(
         mut,
@@ -36,7 +30,7 @@ pub struct ClosePosition<'info> {
         bump,
         constraint = asset.is_enabled @ CoreError::AssetDisabled,
     )]
-    pub asset: Account<'info, Asset>,
+    pub asset: Box<Account<'info, Asset>>,
 
     #[account(
         mut,
@@ -44,16 +38,97 @@ pub struct ClosePosition<'info> {
         bump = position.bump,
         has_one = trader @ CoreError::Unauthorized,
     )]
-    pub position: Account<'info, Position>,
+    pub position: Box<Account<'info, Position>>,
 
     /// CHECK: Validated in `oracle::get_validated_price`
     pub pyth_price_update: UncheckedAccount<'info>,
 
-    /// CHECK: SPL USDC vault token account; deserialized in handler.
-    #[account(mut, constraint = vault_token_account.key() == config.vault @ CoreError::Unauthorized)]
-    pub vault_token_account: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        constraint = vault_token_account.key() == config.vault @ CoreError::Unauthorized,
+        constraint = vault_token_account.mint == config.usdc_mint
+    )]
+    pub vault_token_account: Account<'info, TokenAccount>,
 
-    /// CHECK: Trader USDC ATA; deserialized in handler.
+    #[account(
+        mut,
+        constraint = trader_token_account.owner == trader.key(),
+        constraint = trader_token_account.mint == config.usdc_mint
+    )]
+    pub trader_token_account: Account<'info, TokenAccount>,
+
+    /// CHECK: PDA signer for vault CPI; must match `VaultState.core`.
+    #[account(seeds = [SETTLEMENT_SEED], bump)]
+    pub settlement_authority: UncheckedAccount<'info>,
+
+    #[account(
+        mut,
+        constraint = core_collateral_token.owner == settlement_authority.key(),
+        constraint = core_collateral_token.mint == config.usdc_mint
+    )]
+    pub core_collateral_token: Account<'info, TokenAccount>,
+
+    pub vault_program: Program<'info, BrokexVault>,
+
+    #[account(
+        mut,
+        seeds = [b"vault"],
+        bump,
+        seeds::program = vault_program.key(),
+        constraint = vault_state.token_vault == vault_token_account.key(),
+        constraint = vault_state.core == settlement_authority.key(),
+    )]
+    pub vault_state: Box<Account<'info, VaultState>>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+/// Liquidates an open position when it hits the maintenance margin threshold.
+/// Can be called by anyone (liquidator).
+#[derive(Accounts)]
+#[instruction(asset_id: String)]
+pub struct LiquidatePosition<'info> {
+    #[account(mut)]
+    pub liquidator: Signer<'info>,
+
+    /// CHECK: The trader whose position is being liquidated.
+    pub trader: UncheckedAccount<'info>,
+
+    #[account(
+        seeds = [CONFIG_SEED],
+        bump,
+        constraint = !config.is_paused @ CoreError::Paused
+    )]
+    pub config: Box<Account<'info, ProtocolConfig>>,
+
+    #[account(
+        mut,
+        seeds = [ASSET_SEED, asset_id.as_bytes()],
+        bump,
+        constraint = asset.is_enabled @ CoreError::AssetDisabled,
+    )]
+    pub asset: Box<Account<'info, Asset>>,
+
+    #[account(
+        mut,
+        seeds = [POSITION_SEED, trader.key().as_ref(), asset_id.as_bytes()],
+        bump = position.bump,
+        constraint = position.trader == trader.key() @ CoreError::Unauthorized,
+    )]
+    pub position: Box<Account<'info, Position>>,
+
+    /// CHECK: Validated in `oracle::get_validated_price`
+    pub pyth_price_update: UncheckedAccount<'info>,
+
+    #[account(
+        mut,
+        constraint = vault_token_account.key() == config.vault @ CoreError::Unauthorized,
+        constraint = vault_token_account.mint == config.usdc_mint
+    )]
+    pub vault_token_account: Account<'info, TokenAccount>,
+
+    /// CHECK: Trader's token account (not used for liquidation payout to liquidator yet,
+    /// but needed for settlement flow if any residual is returned, though usually 0).
     #[account(mut)]
     pub trader_token_account: UncheckedAccount<'info>,
 
@@ -61,28 +136,24 @@ pub struct ClosePosition<'info> {
     #[account(seeds = [SETTLEMENT_SEED], bump)]
     pub settlement_authority: UncheckedAccount<'info>,
 
-    /// CHECK: Settlement-authority USDC ATA (vault `settle` layout); unused when `loss == 0`.
-    #[account(mut)]
-    pub core_collateral_token: UncheckedAccount<'info>,
-
-    /// CHECK: Vault program executable; matches `config.vault_program`.
-    #[account(
-        constraint = vault_program.key() == config.vault_program @ CoreError::Unauthorized,
-        constraint = vault_program.executable @ CoreError::InvalidVaultProgram
-    )]
-    pub vault_program: UncheckedAccount<'info>,
-
-    /// CHECK: Vault state PDA; owner + seeds; layout checked in `validate_close_token_layout`.
     #[account(
         mut,
-        owner = vault_program.key(),
+        constraint = core_collateral_token.owner == settlement_authority.key(),
+        constraint = core_collateral_token.mint == config.usdc_mint
+    )]
+    pub core_collateral_token: Account<'info, TokenAccount>,
+
+    pub vault_program: Program<'info, BrokexVault>,
+
+    #[account(
+        mut,
         seeds = [b"vault"],
         bump,
         seeds::program = vault_program.key(),
     )]
-    pub vault_state: UncheckedAccount<'info>,
+    pub vault_state: Box<Account<'info, VaultState>>,
 
-    pub token_program: Program<'info, anchor_spl::token::Token>,
+    pub token_program: Program<'info, Token>,
 }
 
 pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String) -> Result<()> {
@@ -95,8 +166,6 @@ pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String) -> 
         CoreError::PositionNotOpen
     );
 
-    validate_close_token_layout(&ctx)?;
-
     let oracle_price = oracle::get_validated_price(
         &ctx.accounts.pyth_price_update,
         &ctx.accounts.asset.pyth_feed.to_bytes(),
@@ -107,7 +176,7 @@ pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String) -> 
     let asset = &ctx.accounts.asset;
     let position = &ctx.accounts.position;
 
-    // Exit spread uses OI **before** unwind (same as EVM `_closeTrade` ordering vs `_applySpread`).
+    // Exit spread uses OI **before** unwind
     let close_price = logic::apply_spread_close(
         oracle_price,
         position.direction,
@@ -116,70 +185,9 @@ pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String) -> 
         asset.base_spread_bps,
     );
 
-    let funding_fee: u64 = 0;
-
-    let margin = position
-        .size
-        .checked_div(position.leverage as u64)
-        .ok_or(CoreError::Overflow)?;
-    require!(margin > 0, CoreError::InvalidPrice);
-
-    let mut raw_pnl = signed_pnl(
-        position.size,
-        position.entry_price,
-        close_price,
-        position.direction,
-    )?;
-
-    let lp_cap = i128::from(position.lp_locked_capital);
-    if raw_pnl > lp_cap {
-        raw_pnl = lp_cap;
-    }
-
-    let loss_u128 = if raw_pnl < 0 {
-        (-raw_pnl) as u128
-    } else {
-        0u128
-    };
-
-    let liq_threshold = (margin as u128)
-        .checked_mul(logic::LIQ_THRESHOLD_BPS)
-        .ok_or(CoreError::Overflow)?
-        .checked_div(PRECISION)
-        .ok_or(CoreError::Overflow)?;
-
-    let is_liquidation = loss_u128
-        .checked_add(funding_fee as u128)
-        .ok_or(CoreError::Overflow)?
-        >= liq_threshold;
-
-    let margin_after_funding = if funding_fee >= margin {
-        0u64
-    } else {
-        margin.saturating_sub(funding_fee)
-    };
-
-    let (final_state, vault_pay_trader) = if is_liquidation {
-        (PositionState::Liquidated, 0u64)
-    } else if margin_after_funding == 0 {
-        (PositionState::Closed, 0u64)
-    } else if raw_pnl >= 0 {
-        let profit = u64::try_from(raw_pnl).map_err(|_| error!(CoreError::Overflow))?;
-        let total = margin_after_funding
-            .checked_add(profit)
-            .ok_or(CoreError::Overflow)?;
-        (PositionState::Closed, total)
-    } else {
-        let loss = u64::try_from(-raw_pnl).map_err(|_| error!(CoreError::Overflow))?;
-        if loss >= margin_after_funding {
-            (PositionState::Closed, 0u64)
-        } else {
-            let rem = margin_after_funding
-                .checked_sub(loss)
-                .ok_or(CoreError::Overflow)?;
-            (PositionState::Closed, rem)
-        }
-    };
+    let (final_state, vault_pay_trader, _is_liq) = calculate_settlement(position, close_price, 0)?;
+    
+    require!(!_is_liq, CoreError::Overflow); // Trader should use liquidate_position if insolvent
 
     unwind_asset_open_interest(&mut ctx.accounts.asset, position)?;
 
@@ -190,13 +198,8 @@ pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String) -> 
     pm.state = final_state;
 
     if vault_pay_trader > 0 {
-        // Fail early with a core-level error if vault liquidity is insufficient.
-        let vault_ta = {
-            let data = ctx.accounts.vault_token_account.try_borrow_data()?;
-            TokenAccount::try_deserialize(&mut data.as_ref())?
-        };
         require!(
-            vault_ta.amount >= vault_pay_trader,
+            ctx.accounts.vault_token_account.amount >= vault_pay_trader,
             CoreError::InsufficientVaultLiquidity
         );
 
@@ -220,52 +223,112 @@ pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String) -> 
         settle(cpi_ctx, vault_pay_trader, 0)?;
     }
 
-    msg!(
-        "Position closed: asset={}, close_price={}, liq={}, pay={}",
-        asset_id,
-        close_price,
-        is_liquidation,
-        vault_pay_trader
+    Ok(())
+}
+
+pub fn liquidate_position_handler(ctx: Context<LiquidatePosition>, asset_id: String) -> Result<()> {
+    require!(
+        ctx.accounts.position.asset_id == asset_id,
+        CoreError::Unauthorized
     );
+    require!(
+        ctx.accounts.position.state == PositionState::Open,
+        CoreError::PositionNotOpen
+    );
+
+    let oracle_price = oracle::get_validated_price(
+        &ctx.accounts.pyth_price_update,
+        &ctx.accounts.asset.pyth_feed.to_bytes(),
+        60,
+        200,
+    )?;
+
+    let position = &ctx.accounts.position;
+
+    // Liquidation uses mark price (oracle price) directly or with a penalty
+    let close_price = oracle_price;
+
+    let (final_state, _vault_pay_trader, is_liq) = calculate_settlement(position, close_price, 0)?;
+    
+    require!(is_liq, CoreError::Overflow); // Only allow liquidation if threshold is met
+
+    unwind_asset_open_interest(&mut ctx.accounts.asset, position)?;
+
+    let ts = Clock::get()?.unix_timestamp;
+    let pm = &mut ctx.accounts.position;
+    pm.close_price = close_price;
+    pm.close_time = ts;
+    pm.state = final_state;
+
+    // In a liquidation, vault_pay_trader is usually 0. 
+    // Liquidator rewards would be implemented here in a production system.
 
     Ok(())
 }
 
-fn validate_close_token_layout(ctx: &Context<ClosePosition>) -> Result<()> {
-    let usdc = ctx.accounts.config.usdc_mint;
+fn calculate_settlement(
+    position: &Position,
+    close_price: u64,
+    funding_fee: u64,
+) -> Result<(PositionState, u64, bool)> {
+    let margin = position
+        .size
+        .checked_div(position.leverage as u64)
+        .ok_or(CoreError::Overflow)?;
 
-    let vault_ta = {
-        let data = ctx.accounts.vault_token_account.try_borrow_data()?;
-        TokenAccount::try_deserialize(&mut data.as_ref())?
+    let raw_pnl = signed_pnl(
+        position.size,
+        position.entry_price,
+        close_price,
+        position.direction,
+    )?;
+
+    let lp_cap = i128::from(position.lp_locked_capital);
+    let capped_pnl = if raw_pnl > lp_cap { lp_cap } else { raw_pnl };
+
+    let loss_u128 = if capped_pnl < 0 {
+        (-capped_pnl) as u128
+    } else {
+        0u128
     };
-    require_keys_eq!(vault_ta.mint, usdc);
-    require_keys_eq!(
-        ctx.accounts.vault_token_account.key(),
-        ctx.accounts.config.vault
-    );
 
-    let trader_ta = {
-        let data = ctx.accounts.trader_token_account.try_borrow_data()?;
-        TokenAccount::try_deserialize(&mut data.as_ref())?
-    };
-    require_keys_eq!(trader_ta.mint, usdc);
-    require_keys_eq!(trader_ta.owner, ctx.accounts.trader.key());
+    let liq_threshold = (margin as u128)
+        .checked_mul(logic::LIQ_THRESHOLD_BPS)
+        .ok_or(CoreError::Overflow)?
+        .checked_div(PRECISION)
+        .ok_or(CoreError::Overflow)?;
 
-    let core_ta = {
-        let data = ctx.accounts.core_collateral_token.try_borrow_data()?;
-        TokenAccount::try_deserialize(&mut data.as_ref())?
-    };
-    require_keys_eq!(core_ta.mint, usdc);
-    require_keys_eq!(core_ta.owner, ctx.accounts.settlement_authority.key());
+    let is_liquidation = loss_u128
+        .checked_add(funding_fee as u128)
+        .ok_or(CoreError::Overflow)?
+        >= liq_threshold;
 
-    let vs = {
-        let data = ctx.accounts.vault_state.try_borrow_data()?;
-        VaultState::try_deserialize(&mut data.as_ref())?
-    };
-    require_keys_eq!(vs.token_vault, ctx.accounts.vault_token_account.key());
-    require_keys_eq!(vs.core, ctx.accounts.settlement_authority.key());
+    if is_liquidation {
+        return Ok((PositionState::Liquidated, 0, true));
+    }
 
-    Ok(())
+    let margin_after_funding = margin.saturating_sub(funding_fee);
+    if margin_after_funding == 0 {
+        return Ok((PositionState::Closed, 0, false));
+    }
+
+    if capped_pnl >= 0 {
+        let profit = u64::try_from(capped_pnl).map_err(|_| error!(CoreError::Overflow))?;
+        let total = margin_after_funding
+            .checked_add(profit)
+            .ok_or(CoreError::Overflow)?;
+        Ok((PositionState::Closed, total, false))
+    } else {
+        let loss = u64::try_from(-capped_pnl).map_err(|_| error!(CoreError::Overflow))?;
+        if loss >= margin_after_funding {
+            Ok((PositionState::Closed, 0, false))
+        } else {
+            let rem = margin_after_funding
+                .checked_sub(loss)
+                .ok_or(CoreError::Overflow)?;
+            Ok((PositionState::Closed, rem, false))
+        }
+    }
 }
 
 fn signed_pnl(

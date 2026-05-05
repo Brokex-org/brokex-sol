@@ -13,6 +13,7 @@ name = "brokex_core"
 default = []
 # LiteSVM tests load `target/deploy/*.so` — run `yarn test:rust:litesvm` or `prep:program-keys` + `anchor build` first.
 litesvm-integration = []
+mock-oracle = []
 cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []

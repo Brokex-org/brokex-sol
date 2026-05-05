@@ -37,8 +37,18 @@ pub fn get_validated_price(
         .parse::<Pubkey>()
         .map_err(|_| error!(CoreError::InvalidPrice))?;
 
-    //  Ownership check
+    // Ownership check (skipped in mock mode)
+    #[cfg(not(feature = "mock-oracle"))]
     require_keys_eq!(*price_account.owner, expected_owner, CoreError::InvalidOracleOwner);
+
+    #[cfg(feature = "mock-oracle")]
+    {
+        if price_account.owner == &anchor_lang::solana_program::system_program::ID {
+            // Derive price from the first byte of the key to allow control in tests
+            let price = price_account.key().to_bytes()[0] as u64;
+            return Ok(PRICE_PRECISION * price);
+        }
+    }
 
     let data   = price_account.try_borrow_data()?;
     let mut offset = 8 + 32; // Skip discriminator (8b) and accumulator header (32b)

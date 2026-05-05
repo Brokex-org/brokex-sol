@@ -13,6 +13,7 @@ name = "brokex_vault"
 default = []
 # See brokex-core: LiteSVM tests need `target/deploy/*.so` (`yarn test:rust:litesvm`).
 litesvm-integration = []
+mock-oracle = []
 cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []

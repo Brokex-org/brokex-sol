@@ -7,7 +7,8 @@
     "test:rust": "cargo test --workspace -- --nocapture",
     "test:rust:litesvm": "yarn prep:program-keys && anchor build && cargo test --workspace --features litesvm-integration -- --nocapture",
     "prep:program-keys": "mkdir -p target/deploy && cp deploy/brokex_core-keypair.json deploy/brokex_vault-keypair.json target/deploy/",
-    "test:anchor": "yarn prep:program-keys && anchor build && anchor test --skip-build --validator legacy"
+    "test:anchor": "yarn prep:program-keys && anchor build && anchor test --skip-build --validator legacy",
+    "test:lifecycle": "yarn prep:program-keys && anchor build -- --features mock-oracle && anchor test --skip-build --validator legacy tests/brokex-core-lifecycle.ts"
   },
   "dependencies": {
     "@anchor-lang/core": "^1.0.1",

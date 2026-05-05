@@ -65,4 +65,8 @@ pub mod brokex_core {
     ) -> Result<()> {
         instructions::open_position_handler(ctx, asset_id, collateral, leverage, direction, sl_price, tp_price)
     }
+
+    pub fn close_position(ctx: Context<ClosePosition>, asset_id: String) -> Result<()> {
+        instructions::close_position_handler(ctx, asset_id)
+    }
 }

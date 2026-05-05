@@ -766,6 +766,8 @@ dependencies = [
  "anchor-lang",
  "anchor-litesvm",
  "anchor-spl",
+ "brokex-vault",
+ "litesvm-utils",
  "solana-account",
  "spl-associated-token-account",
  "spl-token",

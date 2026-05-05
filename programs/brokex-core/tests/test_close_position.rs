@@ -282,11 +282,16 @@ impl Fixture {
     }
 
     fn position_pda(&self) -> Pubkey {
+        self.position_pda_for(0)
+    }
+
+    fn position_pda_for(&self, trade_id: u64) -> Pubkey {
         Pubkey::find_program_address(
             &[
                 POSITION_SEED,
                 self.trader.pubkey().as_ref(),
                 self.asset_id.as_bytes(),
+                &trade_id.to_le_bytes(),
             ],
             &brokex_core::id(),
         )
@@ -294,6 +299,10 @@ impl Fixture {
     }
 
     fn open_long_default(&mut self) {
+        self.open_long_for(0)
+    }
+
+    fn open_long_for(&mut self, trade_id: u64) {
         let open_ix = Instruction {
             program_id: brokex_core::id(),
             accounts: brokex_core::accounts::OpenPosition {
@@ -301,7 +310,7 @@ impl Fixture {
                 config: self.config_pda,
                 asset: self.asset_pda,
                 pyth_price_update: self.pyth_kp.pubkey(),
-                position: self.position_pda(),
+                position: self.position_pda_for(trade_id),
                 trader_token_account: self.trader_ata,
                 vault_token_account: self.vault_token,
                 token_program: anchor_spl::token::spl_token::ID,
@@ -310,6 +319,7 @@ impl Fixture {
             .to_account_metas(None),
             data: brokex_core::instruction::OpenPosition {
                 asset_id: self.asset_id.clone(),
+                trade_id,
                 collateral: 100_000_000,
                 leverage: 10,
                 direction: PositionDirection::Long,
@@ -329,7 +339,7 @@ impl Fixture {
                 config: self.config_pda,
                 asset: self.asset_pda,
                 pyth_price_update: self.pyth_kp.pubkey(),
-                position: self.position_pda(),
+                position: self.position_pda_for(0),
                 trader_token_account: self.trader_ata,
                 vault_token_account: self.vault_token,
                 token_program: anchor_spl::token::spl_token::ID,
@@ -338,6 +348,7 @@ impl Fixture {
             .to_account_metas(None),
             data: brokex_core::instruction::OpenPosition {
                 asset_id: self.asset_id.clone(),
+                trade_id: 0,
                 collateral: 100_000_000,
                 leverage: 10,
                 direction: PositionDirection::Short,
@@ -356,7 +367,7 @@ impl Fixture {
                 trader: self.trader.pubkey(),
                 config: self.config_pda,
                 asset: self.asset_pda,
-                position: self.position_pda(),
+                position: self.position_pda_for(0),
                 pyth_price_update: self.pyth_kp.pubkey(),
                 vault_token_account: self.vault_token,
                 trader_token_account: self.trader_ata,
@@ -369,6 +380,7 @@ impl Fixture {
             .to_account_metas(None),
             data: brokex_core::instruction::ClosePosition {
                 asset_id: self.asset_id.clone(),
+                trade_id: 0,
             }
             .data(),
         }
@@ -382,7 +394,7 @@ impl Fixture {
                 trader: self.trader.pubkey(),
                 config: self.config_pda,
                 asset: self.asset_pda,
-                position: self.position_pda(),
+                position: self.position_pda_for(0),
                 pyth_price_update: self.pyth_kp.pubkey(),
                 vault_token_account: self.vault_token,
                 trader_token_account: self.trader_ata,
@@ -395,6 +407,7 @@ impl Fixture {
             .to_account_metas(None),
             data: brokex_core::instruction::LiquidatePosition {
                 asset_id: self.asset_id.clone(),
+                trade_id: 0,
             }
             .data(),
         }

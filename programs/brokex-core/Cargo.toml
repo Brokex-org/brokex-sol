@@ -25,11 +25,13 @@ custom-panic = []
 [dependencies]
 anchor-lang = { workspace = true }
 anchor-spl = { workspace = true }
+brokex-vault = { path = "../brokex-vault", features = ["cpi"] }
 spl-token = { version = "9.0.0", features = ["no-entrypoint"] }
 spl-associated-token-account = { version = "8.0.0", features = ["no-entrypoint"] }
 
 [dev-dependencies]
 anchor-litesvm = "0.4.0"
+litesvm-utils = "0.4.0"
 solana-account = "3.4.0"
 
 [[test]]
@@ -44,6 +46,11 @@ required-features = ["litesvm-integration"]
 [[test]]
 name = "test_trade"
 path = "tests/test_trade.rs"
+required-features = ["litesvm-integration"]
+
+[[test]]
+name = "test_close_position"
+path = "tests/test_close_position.rs"
 required-features = ["litesvm-integration"]
 
 [lints.rust]

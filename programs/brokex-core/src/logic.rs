@@ -43,6 +43,39 @@ pub fn apply_spread(
     }
 }
 
+/// EVM `_applySpread(..., isOpen: false)` — exit leg (inverse of `apply_spread` for long/short).
+pub fn apply_spread_close(
+    oracle_price: u64,
+    direction: PositionDirection,
+    long_oi: u64,
+    short_oi: u64,
+    base_spread_bps: u64,
+) -> u64 {
+    let p = calculate_smoothstep_skew(long_oi, short_oi);
+    let is_dominant = match direction {
+        PositionDirection::Long => long_oi > short_oi,
+        PositionDirection::Short => short_oi > long_oi,
+    };
+
+    let spread_bps = if is_dominant {
+        (base_spread_bps as u128 * (PRECISION + 3 * p)) / PRECISION
+    } else {
+        let reduction = (200_000 * p) / PRECISION;
+        let factor = if PRECISION > reduction { PRECISION - reduction } else { 0 };
+        (base_spread_bps as u128 * factor) / PRECISION
+    };
+
+    let amount = (oracle_price as u128 * spread_bps) / (10_000 * PRECISION);
+
+    match direction {
+        PositionDirection::Long => oracle_price.saturating_sub(amount as u64),
+        PositionDirection::Short => oracle_price.saturating_add(amount as u64),
+    }
+}
+
+/// EVM `LIQ_THRESHOLD` (90% of `PRECISION`) for `(loss + funding) >= margin * threshold / PRECISION`.
+pub const LIQ_THRESHOLD_BPS: u128 = 900_000;
+
 /// Ported from EVM: _calculateLiquidationPrice
 pub fn calculate_liquidation_price(
     open_price: u64,

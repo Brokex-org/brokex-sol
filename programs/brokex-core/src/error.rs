@@ -32,4 +32,10 @@ pub enum CoreError {
     MaxOIExceeded,
     #[msg("Max open interest per trader exceeded")]
     MaxTraderOIExceeded,
+    #[msg("Position is not open")]
+    PositionNotOpen,
+    #[msg("Configured vault program account is invalid")]
+    InvalidVaultProgram,
+    #[msg("Vault has insufficient liquidity for settlement payout")]
+    InsufficientVaultLiquidity,
 }

@@ -31,9 +31,6 @@ pub struct OpenPosition<'info> {
     pub pyth_price_update: UncheckedAccount<'info>,
 
     /// Position PDA: One position per trader per asset.
-    /// Decision: We use seeds [b"position", trader, asset_id] to enforce uniqueness.
-    /// This prevents duplicate positions, simplifies state management, and protects
-    /// against state bloat/dust attacks.
     #[account(
         init,
         payer = trader,

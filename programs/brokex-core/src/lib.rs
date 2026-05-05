@@ -70,14 +70,16 @@ pub mod brokex_core {
     pub fn close_position(
         ctx: Context<ClosePosition>,
         asset_id: String,
+        trade_id: u64,
     ) -> Result<()> {
-        instructions::close_position_handler(ctx, asset_id)
+        instructions::close_position_handler(ctx, asset_id, trade_id)
     }
 
     pub fn liquidate_position(
         ctx: Context<LiquidatePosition>,
         asset_id: String,
+        trade_id: u64,
     ) -> Result<()> {
-        instructions::liquidate_position_handler(ctx, asset_id)
+        instructions::liquidate_position_handler(ctx, asset_id, trade_id)
     }
 }

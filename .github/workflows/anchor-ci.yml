@@ -55,12 +55,18 @@ jobs:
       - name: Set Solana cluster to devnet
         run: solana config set --url devnet
 
-      - name: Build Anchor programs
+      - name: Build Anchor programs (production)
         run: anchor build
 
-      # Rust unit integration tests
+      # Rust unit + LiteSVM integration tests run against the production build
       - name: Run Rust tests
         run: cargo test --workspace --features litesvm-integration -- --nocapture
 
-      - name: Run TypeScript tests
+      # Rebuild with mock-oracle feature for TypeScript lifecycle tests.
+      # mock-oracle allows system-owned accounts to act as price feeds in localnet tests.
+      # The feature is ONLY active here; the production binary above is unaffected.
+      - name: Build Anchor programs (mock-oracle for TS tests)
+        run: anchor build -- --features mock-oracle
+
+      - name: Run TypeScript lifecycle tests
         run: anchor test --skip-build --validator legacy

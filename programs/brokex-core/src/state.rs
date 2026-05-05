@@ -78,9 +78,9 @@ pub struct Position {
     pub lp_locked_capital: u64,
     pub sl_price: u64,
     pub tp_price: u64,
-    pub close_price: u64,
-    pub close_time: i64,
     pub state: PositionState,
     pub open_time: i64,
+    pub close_time: i64,
+    pub close_price: u64,
     pub bump: u8,
 }

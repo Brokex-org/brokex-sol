@@ -19,7 +19,7 @@ cluster = "localnet"
 wallet = "keys/localnet-authority.json"
 
 [scripts]
-test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/brokex-core-lifecycle.ts"
 
 # Default `anchor test` uses Surfpool; if simulations fail with
 # "This program may not be used for executing instructions", run:

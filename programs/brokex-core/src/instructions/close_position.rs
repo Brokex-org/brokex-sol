@@ -12,7 +12,7 @@ use crate::state::*;
 
 /// Closes an open position by the trader themselves.
 #[derive(Accounts)]
-#[instruction(asset_id: String)]
+#[instruction(asset_id: String, trade_id: u64)]
 pub struct ClosePosition<'info> {
     #[account(mut)]
     pub trader: Signer<'info>,
@@ -34,7 +34,7 @@ pub struct ClosePosition<'info> {
 
     #[account(
         mut,
-        seeds = [POSITION_SEED, trader.key().as_ref(), asset_id.as_bytes()],
+        seeds = [POSITION_SEED, trader.key().as_ref(), asset_id.as_bytes(), trade_id.to_le_bytes().as_ref()],
         bump = position.bump,
         has_one = trader @ CoreError::Unauthorized,
     )]
@@ -86,7 +86,7 @@ pub struct ClosePosition<'info> {
 /// Liquidates an open position when it hits the maintenance margin threshold.
 /// Can be called by anyone (liquidator).
 #[derive(Accounts)]
-#[instruction(asset_id: String)]
+#[instruction(asset_id: String, trade_id: u64)]
 pub struct LiquidatePosition<'info> {
     #[account(mut)]
     pub liquidator: Signer<'info>,
@@ -111,7 +111,7 @@ pub struct LiquidatePosition<'info> {
 
     #[account(
         mut,
-        seeds = [POSITION_SEED, trader.key().as_ref(), asset_id.as_bytes()],
+        seeds = [POSITION_SEED, trader.key().as_ref(), asset_id.as_bytes(), trade_id.to_le_bytes().as_ref()],
         bump = position.bump,
         constraint = position.trader == trader.key() @ CoreError::Unauthorized,
     )]
@@ -156,7 +156,7 @@ pub struct LiquidatePosition<'info> {
     pub token_program: Program<'info, Token>,
 }
 
-pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String) -> Result<()> {
+pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String, _trade_id: u64) -> Result<()> {
     require!(
         ctx.accounts.position.asset_id == asset_id,
         CoreError::Unauthorized
@@ -226,7 +226,7 @@ pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String) -> 
     Ok(())
 }
 
-pub fn liquidate_position_handler(ctx: Context<LiquidatePosition>, asset_id: String) -> Result<()> {
+pub fn liquidate_position_handler(ctx: Context<LiquidatePosition>, asset_id: String, _trade_id: u64) -> Result<()> {
     require!(
         ctx.accounts.position.asset_id == asset_id,
         CoreError::Unauthorized

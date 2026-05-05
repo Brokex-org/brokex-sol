@@ -299,10 +299,10 @@ impl Fixture {
     }
 
     fn open_long_default(&mut self) {
-        self.open_long_for(0)
+        self.open_long(0);
     }
 
-    fn open_long_for(&mut self, trade_id: u64) {
+    fn open_long(&mut self, trade_id: u64) {
         let open_ix = Instruction {
             program_id: brokex_core::id(),
             accounts: brokex_core::accounts::OpenPosition {
@@ -361,13 +361,17 @@ impl Fixture {
     }
 
     fn close_ix(&self) -> Instruction {
+        self.close_ix_for(0)
+    }
+
+    fn close_ix_for(&self, trade_id: u64) -> Instruction {
         Instruction {
             program_id: brokex_core::id(),
             accounts: brokex_core::accounts::ClosePosition {
                 trader: self.trader.pubkey(),
                 config: self.config_pda,
                 asset: self.asset_pda,
-                position: self.position_pda_for(0),
+                position: self.position_pda_for(trade_id),
                 pyth_price_update: self.pyth_kp.pubkey(),
                 vault_token_account: self.vault_token,
                 trader_token_account: self.trader_ata,
@@ -380,13 +384,17 @@ impl Fixture {
             .to_account_metas(None),
             data: brokex_core::instruction::ClosePosition {
                 asset_id: self.asset_id.clone(),
-                trade_id: 0,
+                trade_id,
             }
             .data(),
         }
     }
 
     fn liquidate_ix(&self, liquidator_pubkey: Pubkey) -> Instruction {
+        self.liquidate_ix_for(liquidator_pubkey, 0)
+    }
+
+    fn liquidate_ix_for(&self, liquidator_pubkey: Pubkey, trade_id: u64) -> Instruction {
         Instruction {
             program_id: brokex_core::id(),
             accounts: brokex_core::accounts::LiquidatePosition {
@@ -394,7 +402,7 @@ impl Fixture {
                 trader: self.trader.pubkey(),
                 config: self.config_pda,
                 asset: self.asset_pda,
-                position: self.position_pda_for(0),
+                position: self.position_pda_for(trade_id),
                 pyth_price_update: self.pyth_kp.pubkey(),
                 vault_token_account: self.vault_token,
                 trader_token_account: self.trader_ata,
@@ -407,7 +415,7 @@ impl Fixture {
             .to_account_metas(None),
             data: brokex_core::instruction::LiquidatePosition {
                 asset_id: self.asset_id.clone(),
-                trade_id: 0,
+                trade_id,
             }
             .data(),
         }

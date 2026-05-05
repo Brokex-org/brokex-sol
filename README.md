@@ -24,40 +24,51 @@ Key mechanics:
 brokex-solana/
 ├── programs/
 │   ├── brokex-core/
-│   │   └── src/
-│   │       ├── lib.rs              # Core program entry point
-│   │       ├── constants.rs
-│   │       ├── errors.rs
-│   │       ├── state/
-│   │       │   ├── config.rs       # Protocol config PDA (admin, paused)
-│   │       │   ├── asset.rs        # Per-asset config (Pyth feed, leverage, enabled)
-│   │       │   └── position.rs     # Trader position accounts
-│   │       ├── instructions/
-│   │       │   ├── initialize.rs   # Initialize protocol config
-│   │       │   ├── add_asset.rs    # Register tradable asset
-│   │       │   ├── open_position.rs
-│   │       │   └── close_position.rs
-│   │       └── oracle/
-│   │           └── pyth.rs         # Pyth price feed integration
+│   │   ├── src/
+│   │   │   ├── lib.rs                    # Program entry + instructions (initialize, assets, positions, liquidation)
+│   │   │   ├── constants.rs
+│   │   │   ├── error.rs
+│   │   │   ├── state.rs                  # Protocol config, assets, positions
+│   │   │   ├── logic.rs                  # PnL / risk helpers
+│   │   │   ├── oracle.rs                 # Oracle integration (Pyth)
+│   │   │   ├── instructions.rs
+│   │   │   └── instructions/
+│   │   │       ├── initialize_protocol.rs
+│   │   │       ├── add_asset.rs
+│   │   │       ├── toggle_asset_status.rs
+│   │   │       ├── toggle_protocol_status.rs
+│   │   │       ├── update_admin.rs       # propose / accept admin
+│   │   │       ├── open_position.rs
+│   │   │       ├── close_position.rs
+│   │   │       └── liquidate_position.rs
+│   │   └── tests/                        # Rust integration tests (LiteSVM / program-test)
 │   └── brokex-vault/
-│       └── src/
-│           ├── lib.rs              # Vault program entry point
-│           ├── errors.rs
-│           ├── state/
-│           │   └── vault.rs        # Vault state PDA
-│           └── instructions/
-│               ├── initialize.rs   # Initialize vault
-│               ├── deposit.rs      # Admin deposit USDC
-│               ├── withdraw.rs     # Admin withdraw USDC
-│               └── settle.rs       # CPI target — pay/receive from Core
-├── tests/                          # Anchor integration tests
-├── docs/
+│       ├── src/
+│       │   ├── lib.rs
+│       │   ├── contexts.rs               # #[derive(Accounts)] for Anchor clients
+│       │   ├── constants.rs
+│       │   ├── error.rs
+│       │   ├── state/
+│       │   │   └── vault.rs
+│       │   └── instructions/
+│       │       ├── initialize.rs
+│       │       ├── deposit.rs
+│       │       ├── withdraw.rs
+│       │       ├── settle.rs             # CPI target — pay/receive from Core
+│       │       └── admin_set_paused.rs
+│       └── tests/
+│           └── vault_flow.rs
+├── deploy/                               # Program keypairs (used by prep:program-keys → target/deploy)
+├── tests/                                # Anchor TS tests (mocha)
+├── MVP_SPEC.md                           # MVP technical specification
 ├── .env.example
-├── Anchor.toml
+├── Anchor.toml                           # Anchor 1.0.1; program IDs & provider wallet
 ├── Cargo.toml
 ├── CONTRIBUTION.md
 └── package.json
 ```
+
+---
 
 ## Prerequisites
 
@@ -65,9 +76,9 @@ Ensure the following are installed before setting up the project:
 
 - [Rust](https://rustup.rs/) (stable)
 - [Solana CLI](https://docs.solana.com/cli/install-solana-cli-tools)
-- [Anchor CLI](https://www.anchor-lang.com/docs/installation) via AVM
+- [Anchor CLI](https://www.anchor-lang.com/docs/installation) **1.0.1** (match `anchor_version` in `Anchor.toml`; install via [AVM](https://www.anchor-lang.com/docs/installation))
 - Node.js >= 18
-- Yarn
+- Yarn (classic / v1 — see `package.json` `packageManager`)
 
 ---
 
@@ -79,6 +90,8 @@ Ensure the following are installed before setting up the project:
 git clone https://github.com/Brokex-org/brokex-sol.git
 cd brokex-sol
 ```
+
+Use your checkout directory name in later commands if it differs (for example if you renamed the folder).
 
 ### 2. Install dependencies
 
@@ -92,7 +105,7 @@ yarn install
 cp .env.example .env
 ```
 
-Fill in the required values in `.env` (see [Environment Variables](#environment-variables)).
+Fill in the required values in `.env` (see [Environment Variables](#environment-variables)). For deployed devnet programs you can copy IDs from `Anchor.toml` under `[programs.devnet]`.
 
 ### 4. Configure Solana CLI
 
@@ -102,22 +115,15 @@ solana-keygen new --outfile ~/.config/solana/id.json
 solana airdrop 2
 ```
 
-### 5. Build both program
+For `anchor test` on **localnet**, `Anchor.toml` points the provider wallet at `keys/localnet-authority.json`. Create that keypair (or adjust `Anchor.toml`) before running tests locally.
+
+### 5. Build both programs
 
 ```bash
 anchor build
 ```
 
-### 6. Get your Program IDs
-
-```bash
-solana address -k target/deploy/brokex_core-keypair.json
-solana address -k target/deploy/brokex_vault-keypair.json
-```
-
-Update `declare_id!()` in `programs/brokex/src/lib.rs` and `[programs.devnet]` in `Anchor.toml` with this value.
-
-### 7. Deploy to devnet
+### 6. Deploy to devnet
 
 ```bash
 anchor deploy --provider.cluster devnet
@@ -138,7 +144,7 @@ solana program show --programs
 ANCHOR_PROVIDER_URL=https://api.devnet.solana.com
 ANCHOR_WALLET=~/.config/solana/id.json
 
-# Program IDs
+# Program IDs (match Anchor.toml [programs.devnet] after deploy, or build artifacts)
 CORE_PROGRAM_ID=
 VAULT_PROGRAM_ID=
 
@@ -163,7 +169,17 @@ KEEPER_INTERVAL_MS=5000
 
 ## Running Tests
 
-### Local validator (recommended for development)
+### Anchor TypeScript tests (default workflow)
+
+The repo pins Anchor **1.0.1**. Default `anchor test` uses Surfpool; if simulations fail with a message like program cannot execute instructions, use the **legacy** validator or the wrapper script:
+
+```bash
+yarn test:anchor
+```
+
+That runs `prep:program-keys`, `anchor build`, then `anchor test --skip-build --validator legacy`.
+
+### Local validator (manual)
 
 ```bash
 # Terminal 1
@@ -173,24 +189,43 @@ solana-test-validator
 anchor test --provider.cluster localnet
 ```
 
+### Rust tests
+
+```bash
+yarn test:rust
+```
+
+LiteSVM-backed integration tests (after build + key prep):
+
+```bash
+yarn test:rust:litesvm
+```
+
 ### Against devnet
 
 ```bash
 anchor test --provider.cluster devnet
 ```
 
+### Useful checks
+
+```bash
+yarn check:rust    # cargo check both programs
+yarn lint          # Prettier on JS/TS
+```
+
 ---
 
 ## Tech Stack
 
-| Layer            | Technology                             |
-| ---------------- | -------------------------------------- |
-| Smart contracts  | Rust + Anchor                          |
-| Oracle           | Pyth Network                           |
-| Settlement token | USDC (SPL)                             |
-| Off-chain keeper | TypeScript + @solana/web3.js           |
-| Testing          | solana-program-test + Anchor TS client |
-| Network          | Solana (Devnet → Mainnet)              |
+| Layer              | Technology                             |
+| ------------------ | -------------------------------------- |
+| Smart contracts    | Rust + Anchor 1.0.1                    |
+| Oracle             | Pyth Network                           |
+| Settlement token   | USDC (SPL)                             |
+| Off-chain keeper   | TypeScript + @solana/web3.js           |
+| Testing            | Anchor TS + Rust (`cargo test`, LiteSVM integration where enabled) |
+| Network            | Solana (Localnet / Devnet → Mainnet)   |
 
 ---
 

@@ -65,6 +65,7 @@ pub enum PositionState {
 #[account]
 #[derive(InitSpace)]
 pub struct Position {
+    pub trade_id: u64,
     pub trader: Pubkey,
     #[max_len(32)]
     pub asset_id: String,

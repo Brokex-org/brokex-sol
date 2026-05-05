@@ -7,7 +7,7 @@ use crate::logic;
 use crate::error::CoreError;
 
 #[derive(Accounts)]
-#[instruction(asset_id: String)]
+#[instruction(asset_id: String, trade_id: u64)]
 pub struct OpenPosition<'info> {
     #[account(mut)]
     pub trader: Signer<'info>,
@@ -30,12 +30,17 @@ pub struct OpenPosition<'info> {
     /// CHECK: Validated in oracle::get_validated_price
     pub pyth_price_update: UncheckedAccount<'info>,
 
-    /// Position PDA: One position per trader per asset.
+    /// Position PDA: Supports multiple positions per trader per asset via `trade_id`.
     #[account(
         init,
         payer = trader,
         space = 8 + Position::INIT_SPACE,
-        seeds = [POSITION_SEED, trader.key().as_ref(), asset_id.as_bytes()],
+        seeds = [
+            POSITION_SEED, 
+            trader.key().as_ref(), 
+            asset_id.as_bytes(), 
+            trade_id.to_le_bytes().as_ref()
+        ],
         bump
     )]
     pub position: Account<'info, Position>,
@@ -61,6 +66,7 @@ pub struct OpenPosition<'info> {
 pub fn open_position_handler(
     ctx: Context<OpenPosition>,
     asset_id: String,
+    trade_id: u64,
     collateral: u64,
     leverage: u8,
     direction: PositionDirection,
@@ -183,6 +189,7 @@ pub fn open_position_handler(
 
     // Store Position
     let position = &mut ctx.accounts.position;
+    position.trade_id = trade_id;
     position.trader = ctx.accounts.trader.key();
     position.asset_id = asset_id;
     position.direction = direction;

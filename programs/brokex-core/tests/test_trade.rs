@@ -167,7 +167,16 @@ fn test_open_position_full_logic() {
     ctx.svm.set_sysvar(&clock);
 
     // Open Position
-    let (position_pda, _) = Pubkey::find_program_address(&[POSITION_SEED, trader.pubkey().as_ref(), asset_id.as_bytes()], &program_id);
+    let trade_id: u64 = 0;
+    let (position_pda, _) = Pubkey::find_program_address(
+        &[
+            POSITION_SEED, 
+            trader.pubkey().as_ref(), 
+            asset_id.as_bytes(), 
+            trade_id.to_le_bytes().as_ref()
+        ], 
+        &program_id
+    );
     let open_ix = Instruction {
         program_id,
         accounts: brokex_core::accounts::OpenPosition {
@@ -183,6 +192,7 @@ fn test_open_position_full_logic() {
         }.to_account_metas(None),
         data: brokex_core::instruction::OpenPosition {
             asset_id: asset_id.clone(),
+            trade_id,
             collateral: 100_000_000,
             leverage: 10,
             direction: PositionDirection::Long,

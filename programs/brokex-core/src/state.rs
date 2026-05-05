@@ -82,7 +82,5 @@ pub struct Position {
     pub close_time: i64,
     pub state: PositionState,
     pub open_time: i64,
-    pub close_time: i64,
-    pub close_price: u64,
     pub bump: u8,
 }

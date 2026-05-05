@@ -73,7 +73,6 @@ struct Fixture {
     vault_token: Pubkey,
     admin_ata: Pubkey,
     trader_ata: Pubkey,
-    core_collateral_ata: Pubkey,
 }
 
 impl Fixture {
@@ -110,14 +109,6 @@ impl Fixture {
             .create_associated_token_account(&mint, &trader)
             .expect("trader ata");
 
-        let core_collateral_ata = ctx
-            .svm
-            .create_associated_token_account(&mint, &core)
-            .expect("core ata");
-        ctx.svm
-            .mint_to(&mint, &core_collateral_ata, &admin, 50_000_000)
-            .expect("mint core collateral");
-
         Self {
             ctx,
             admin,
@@ -129,7 +120,6 @@ impl Fixture {
             vault_token,
             admin_ata,
             trader_ata,
-            core_collateral_ata,
         }
     }
 
@@ -195,7 +185,6 @@ impl Fixture {
                 vault_state: self.vault_state,
                 vault_token: self.vault_token,
                 trader_token: self.trader_ata,
-                core_collateral_token: self.core_collateral_ata,
                 token_program: spl_token::id(),
             }
             .to_account_metas(None),
@@ -262,7 +251,6 @@ fn settle_breakeven_no_transfers() {
     exec_ok(&mut f.ctx, ix, &[&f.admin]);
     let v_before = f.ctx.svm.get_account(&f.vault_token).unwrap().data;
     let t_before = f.ctx.svm.get_account(&f.trader_ata).unwrap().data;
-    let c_before = f.ctx.svm.get_account(&f.core_collateral_ata).unwrap().data;
 
     let ix = f.settle_ix(0, 0, &f.core);
     exec_ok(&mut f.ctx, ix, &[&f.core]);
@@ -275,23 +263,6 @@ fn settle_breakeven_no_transfers() {
         f.ctx.svm.get_account(&f.trader_ata).unwrap().data,
         t_before
     );
-    assert_eq!(
-        f.ctx.svm.get_account(&f.core_collateral_ata).unwrap().data,
-        c_before
-    );
-}
-
-#[test]
-fn settle_loss_moves_from_core_collateral_to_vault() {
-    let mut f = Fixture::new_uninitialized();
-    f.initialize();
-    let ix = f.deposit_ix(f.admin_ata, 10_000_000);
-    exec_ok(&mut f.ctx, ix, &[&f.admin]);
-
-    let ix = f.settle_ix(0, 4_000_000, &f.core);
-    exec_ok(&mut f.ctx, ix, &[&f.core]);
-    f.ctx.svm.assert_token_balance(&f.vault_token, 14_000_000);
-    f.ctx.svm.assert_token_balance(&f.core_collateral_ata, 46_000_000);
 }
 
 // ─── Initialize ─────────────────────────────────────────────────────────────
@@ -500,25 +471,29 @@ fn settle_profit_exceeds_vault_rejected() {
 }
 
 #[test]
-fn settle_loss_exceeds_collateral_rejected() {
+fn settle_loss_is_retained_in_vault() {
     let mut f = Fixture::new_uninitialized();
     f.initialize();
     let ix = f.deposit_ix(f.admin_ata, 10_000_000);
     exec_ok(&mut f.ctx, ix, &[&f.admin]);
-    let ix = f.settle_ix(0, 51_000_000, &f.core);
-    let r = exec(&mut f.ctx, ix, &[&f.core]);
-    assert_anchor_err(&r, "InsufficientBalance");
+    
+    // Loss is 5M. Vault already has 10M.
+    // After settle(loss=5M), Vault still has 10M (it just didn't pay out anything).
+    let ix = f.settle_ix(0, 5_000_000, &f.core);
+    exec_ok(&mut f.ctx, ix, &[&f.core]);
+    f.ctx.svm.assert_token_balance(&f.vault_token, 10_000_000);
 }
 
 #[test]
-fn settle_profit_and_loss_same_ix_rejected() {
+fn settle_profit_and_loss_same_ix_allowed() {
     let mut f = Fixture::new_uninitialized();
     f.initialize();
     let ix = f.deposit_ix(f.admin_ata, 10_000_000);
     exec_ok(&mut f.ctx, ix, &[&f.admin]);
     let ix = f.settle_ix(1_000_000, 1_000_000, &f.core);
-    let r = exec(&mut f.ctx, ix, &[&f.core]);
-    assert_anchor_err(&r, "InvalidVaultValue");
+    exec_ok(&mut f.ctx, ix, &[&f.core]);
+    // Vault paid out 1M profit, so it should have 9M left.
+    f.ctx.svm.assert_token_balance(&f.vault_token, 9_000_000);
 }
 
 // ─── Paused ─────────────────────────────────────────────────────────────────

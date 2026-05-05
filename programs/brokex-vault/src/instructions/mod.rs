@@ -5,9 +5,11 @@ mod deposit;
 mod initialize;
 mod settle;
 mod withdraw;
+mod update_locked_capital;
 
 pub use admin_set_paused::set_paused_handler;
 pub use deposit::deposit_handler;
 pub use initialize::initialize_handler;
 pub use settle::settle_handler;
 pub use withdraw::withdraw_handler;
+pub use update_locked_capital::update_locked_capital_handler;

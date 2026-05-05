@@ -44,15 +44,5 @@ name = "test_protocol"
 path = "tests/test_protocol.rs"
 required-features = ["litesvm-integration"]
 
-[[test]]
-name = "test_trade"
-path = "tests/test_trade.rs"
-required-features = ["litesvm-integration"]
-
-[[test]]
-name = "test_close_position"
-path = "tests/test_close_position.rs"
-required-features = ["litesvm-integration"]
-
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

@@ -82,31 +82,52 @@ describe("brokex-core-lifecycle", () => {
   }
 
   before(async () => {
-    const sig = await provider.connection.requestAirdrop(trader.publicKey, 10 * LAMPORTS_PER_SOL);
+    const sig = await provider.connection.requestAirdrop(
+      trader.publicKey,
+      10 * LAMPORTS_PER_SOL,
+    );
     await provider.connection.confirmTransaction(sig);
 
-    usdcMint = await createMint(provider.connection, admin, admin.publicKey, null, 6);
-    
-    vaultStatePda = PublicKey.findProgramAddressSync([VAULT_SEED], vaultProgram.programId)[0];
-    vaultTokenAta = getAssociatedTokenAddressSync(usdcMint, vaultStatePda, true);
-    
-    settlementAuthorityPda = PublicKey.findProgramAddressSync([SETTLEMENT_SEED], coreProgram.programId)[0];
+    usdcMint = await createMint(
+      provider.connection,
+      admin,
+      admin.publicKey,
+      null,
+      6,
+    );
+
+    vaultStatePda = PublicKey.findProgramAddressSync(
+      [VAULT_SEED],
+      vaultProgram.programId,
+    )[0];
+    vaultTokenAta = getAssociatedTokenAddressSync(
+      usdcMint,
+      vaultStatePda,
+      true,
+    );
+
+    settlementAuthorityPda = PublicKey.findProgramAddressSync(
+      [SETTLEMENT_SEED],
+      coreProgram.programId,
+    )[0];
 
     // Ensure oracle accounts exist (even if empty, mock-oracle logic handles them)
     for (const kp of [oracle60, oracle70, oracle50, oracle1, oracleFresh]) {
-        const tx = new anchor.web3.Transaction().add(
-            SystemProgram.createAccount({
-                fromPubkey: admin.publicKey,
-                newAccountPubkey: kp.publicKey,
-                lamports: await provider.connection.getMinimumBalanceForRentExemption(0),
-                space: 0,
-                programId: SystemProgram.programId,
-            })
-        );
-        await provider.sendAndConfirm(tx, [admin, kp]);
+      const tx = new anchor.web3.Transaction().add(
+        SystemProgram.createAccount({
+          fromPubkey: admin.publicKey,
+          newAccountPubkey: kp.publicKey,
+          lamports: await provider.connection.getMinimumBalanceForRentExemption(
+            0,
+          ),
+          space: 0,
+          programId: SystemProgram.programId,
+        }),
+      );
+      await provider.sendAndConfirm(tx, [admin, kp]);
     }
 
-    // Initialize Vault (idempotent)
+    // Initialize Vault
     const vaultInfo = await provider.connection.getAccountInfo(vaultStatePda);
     if (!vaultInfo) {
       await vaultProgram.methods
@@ -122,11 +143,11 @@ describe("brokex-core-lifecycle", () => {
         .rpc();
     }
 
-    // Initialize Core (idempotent)
+    // Initialize Core
     const coreConfigInfo = await provider.connection.getAccountInfo(configPda);
     if (!coreConfigInfo) {
       await coreProgram.methods
-        .initializeProtocol(usdcMint, vaultTokenAta, vaultProgram.programId)
+        .initializeProtocol(usdcMint, vaultTokenAta, vaultStatePda)
         .accountsPartial({
           config: configPda,
           admin: admin.publicKey,
@@ -139,17 +160,7 @@ describe("brokex-core-lifecycle", () => {
     const assetInfo = await provider.connection.getAccountInfo(assetPda);
     if (!assetInfo) {
       const configInput = {
-        minLeverage: new BN(1),
-        maxLeverage: new BN(100),
-        minTradeSize: new BN(1_000_000),
-        commissionOpenBps: new BN(10),
-        baseSpreadBps: new BN(20),
-        maxOpenInterest: new BN(1_000_000_000_000),
-        maxOiPerTrader: new BN(100_000_000_000),
-        alphaMin: new BN(500_000),
-        alphaScale: new BN(1_000_000_000),
-        k: new BN(100_000_000),
-        profitCapBps: new BN(5000),
+        commissionOpenBps: new BN(0),
       };
       await coreProgram.methods
         .addAsset(assetId, oracle60.publicKey, configInput)
@@ -162,9 +173,31 @@ describe("brokex-core-lifecycle", () => {
         .rpc();
     }
 
-    traderAta = (await getOrCreateAssociatedTokenAccount(provider.connection, admin, usdcMint, trader.publicKey)).address;
-    await mintTo(provider.connection, admin, usdcMint, traderAta, admin.publicKey, 1_000_000_000); // 1000 USDC
-    coreCollateralAta = (await getOrCreateAssociatedTokenAccount(provider.connection, admin, usdcMint, settlementAuthorityPda, true)).address;
+    traderAta = (
+      await getOrCreateAssociatedTokenAccount(
+        provider.connection,
+        admin,
+        usdcMint,
+        trader.publicKey,
+      )
+    ).address;
+    await mintTo(
+      provider.connection,
+      admin,
+      usdcMint,
+      traderAta,
+      admin.publicKey,
+      1_000_000_000,
+    ); // 1000 USDC
+    coreCollateralAta = (
+      await getOrCreateAssociatedTokenAccount(
+        provider.connection,
+        admin,
+        usdcMint,
+        settlementAuthorityPda,
+        true,
+      )
+    ).address;
   });
 
   it("Test 1: Admin initializes protocol (verification)", async () => {
@@ -192,7 +225,9 @@ describe("brokex-core-lifecycle", () => {
     const tradeId = 10;
     const positionPda = derivePositionPda(trader.publicKey, assetId, tradeId);
     await coreProgram.methods
-      .openPosition(assetId, new BN(tradeId), new BN(100_000_000), 10, { long: {} }, new BN(0), new BN(0))
+      .openPosition(assetId, new BN(tradeId), new BN(100_000_000), 10, {
+        long: {},
+      })
       .accountsPartial({
         trader: trader.publicKey,
         config: configPda,
@@ -201,6 +236,9 @@ describe("brokex-core-lifecycle", () => {
         position: positionPda,
         traderTokenAccount: traderAta,
         vaultTokenAccount: vaultTokenAta,
+        vaultState: vaultStatePda,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
@@ -217,7 +255,9 @@ describe("brokex-core-lifecycle", () => {
     const tradeId = 20;
     const positionPda = derivePositionPda(trader.publicKey, assetId, tradeId);
     await coreProgram.methods
-      .openPosition(assetId, new BN(tradeId), new BN(50_000_000), 5, { short: {} }, new BN(0), new BN(0))
+      .openPosition(assetId, new BN(tradeId), new BN(50_000_000), 5, {
+        short: {},
+      })
       .accountsPartial({
         trader: trader.publicKey,
         config: configPda,
@@ -226,6 +266,9 @@ describe("brokex-core-lifecycle", () => {
         position: positionPda,
         traderTokenAccount: traderAta,
         vaultTokenAccount: vaultTokenAta,
+        vaultState: vaultStatePda,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
@@ -263,14 +306,25 @@ describe("brokex-core-lifecycle", () => {
     const tradeId = 50;
     const positionPda = derivePositionPda(trader.publicKey, assetId, tradeId);
     await coreProgram.methods
-      .openPosition(assetId, new BN(tradeId), new BN(100_000_000), 10, { long: {} }, new BN(0), new BN(0))
-      .accountsPartial({
-        trader: trader.publicKey, config: configPda, asset: assetPda,
-        pythPriceUpdate: oracle60.publicKey, position: positionPda,
-        traderTokenAccount: traderAta, vaultTokenAccount: vaultTokenAta,
-        tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+      .openPosition(assetId, new BN(tradeId), new BN(100_000_000), 10, {
+        long: {},
       })
-      .signers([trader]).rpc();
+      .accountsPartial({
+        trader: trader.publicKey,
+        config: configPda,
+        asset: assetPda,
+        pythPriceUpdate: oracle60.publicKey,
+        position: positionPda,
+        traderTokenAccount: traderAta,
+        vaultTokenAccount: vaultTokenAta,
+        vaultState: vaultStatePda,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([trader])
+      .rpc();
 
     const traderBefore = (await provider.connection.getTokenAccountBalance(traderAta)).value.uiAmount!;
     const vaultBefore  = (await provider.connection.getTokenAccountBalance(vaultTokenAta)).value.uiAmount!;
@@ -279,14 +333,20 @@ describe("brokex-core-lifecycle", () => {
     await coreProgram.methods
       .closePosition(assetId, new BN(tradeId))
       .accountsPartial({
-        trader: trader.publicKey, config: configPda, asset: assetPda,
-        position: positionPda, pythPriceUpdate: oracle70.publicKey,
-        vaultTokenAccount: vaultTokenAta, traderTokenAccount: traderAta,
-        settlementAuthority: settlementAuthorityPda, coreCollateralToken: coreCollateralAta,
-        vaultProgram: vaultProgram.programId, vaultState: vaultStatePda,
+        trader: trader.publicKey,
+        config: configPda,
+        asset: assetPda,
+        position: positionPda,
+        pythPriceUpdate: oracle70.publicKey,
+        vaultTokenAccount: vaultTokenAta,
+        traderTokenAccount: traderAta,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
+        vaultState: vaultStatePda,
         tokenProgram: TOKEN_PROGRAM_ID,
       })
-      .signers([trader]).rpc();
+      .signers([trader])
+      .rpc();
 
     const traderAfter = (await provider.connection.getTokenAccountBalance(traderAta)).value.uiAmount!;
     const vaultAfter  = (await provider.connection.getTokenAccountBalance(vaultTokenAta)).value.uiAmount!;
@@ -305,92 +365,145 @@ describe("brokex-core-lifecycle", () => {
     const tradeId = 60;
     const positionPda = derivePositionPda(trader.publicKey, assetId, tradeId);
     await coreProgram.methods
-      .openPosition(assetId, new BN(tradeId), new BN(100_000_000), 2, { long: {} }, new BN(0), new BN(0))
-      .accountsPartial({
-        trader: trader.publicKey, config: configPda, asset: assetPda,
-        pythPriceUpdate: oracle60.publicKey, position: positionPda,
-        traderTokenAccount: traderAta, vaultTokenAccount: vaultTokenAta,
-        tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+      .openPosition(assetId, new BN(tradeId), new BN(100_000_000), 2, {
+        long: {},
       })
-      .signers([trader]).rpc();
+      .accountsPartial({
+        trader: trader.publicKey,
+        config: configPda,
+        asset: assetPda,
+        pythPriceUpdate: oracle60.publicKey,
+        position: positionPda,
+        traderTokenAccount: traderAta,
+        vaultTokenAccount: vaultTokenAta,
+        vaultState: vaultStatePda,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([trader])
+      .rpc();
 
-    const traderBefore      = (await provider.connection.getTokenAccountBalance(traderAta)).value.uiAmount!;
-    const coreCollatBefore  = (await provider.connection.getTokenAccountBalance(coreCollateralAta)).value.uiAmount!;
+    const traderBefore = (
+      await provider.connection.getTokenAccountBalance(traderAta)
+    ).value.uiAmount!;
 
     // Close at $50 — partial loss, trader gets back some collateral
     await coreProgram.methods
       .closePosition(assetId, new BN(tradeId))
       .accountsPartial({
-        trader: trader.publicKey, config: configPda, asset: assetPda,
-        position: positionPda, pythPriceUpdate: oracle50.publicKey,
-        vaultTokenAccount: vaultTokenAta, traderTokenAccount: traderAta,
-        settlementAuthority: settlementAuthorityPda, coreCollateralToken: coreCollateralAta,
-        vaultProgram: vaultProgram.programId, vaultState: vaultStatePda,
+        trader: trader.publicKey,
+        config: configPda,
+        asset: assetPda,
+        position: positionPda,
+        pythPriceUpdate: oracle50.publicKey,
+        vaultTokenAccount: vaultTokenAta,
+        traderTokenAccount: traderAta,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
+        vaultState: vaultStatePda,
         tokenProgram: TOKEN_PROGRAM_ID,
       })
-      .signers([trader]).rpc();
+      .signers([trader])
+      .rpc();
 
-    const traderAfter     = (await provider.connection.getTokenAccountBalance(traderAta)).value.uiAmount!;
-    const coreCollatAfter = (await provider.connection.getTokenAccountBalance(coreCollateralAta)).value.uiAmount!;
+    const traderAfter = (
+      await provider.connection.getTokenAccountBalance(traderAta)
+    ).value.uiAmount!;
 
     // Trader received partial collateral back (some, but less than 100 USDC)
     assert.ok(traderAfter > traderBefore,        "trader gets some collateral back on partial loss");
-    assert.ok(traderAfter < traderBefore + 100,  "but less than full 100 USDC collateral");
-    // The loss stays in core_collateral_token (vault CPI only fires on profit payouts)
-    assert.ok(coreCollatAfter >= coreCollatBefore, "loss amount retained in core_collateral_token");
+    assert.ok(
+      traderAfter < traderBefore + 100,
+      "but less than full 100 USDC collateral",
+    );
     const pos = await coreProgram.account.position.fetch(positionPda);
     assert.ok(pos.state.hasOwnProperty("closed"), "position should be closed");
   });
 
-  it("Test 7: Full collateral loss scenario (liquidation)", async () => {
-    // Open long at $60 with 10x leverage, price drops to $1.
-    // Loss >> collateral → hits liquidation threshold.
-    // Must call liquidate_position (not close_position) because the Rust code
-    // requires !is_liq on close_position and is_liq on liquidate_position.
+  it("Test 7: Emergency close returns 100% collateral", async () => {
+    // Open position (tradeId=70)
     const tradeId = 70;
     const positionPda = derivePositionPda(trader.publicKey, assetId, tradeId);
     await coreProgram.methods
-      .openPosition(assetId, new BN(tradeId), new BN(100_000_000), 10, { long: {} }, new BN(0), new BN(0))
-      .accountsPartial({
-        trader: trader.publicKey, config: configPda, asset: assetPda,
-        pythPriceUpdate: oracle60.publicKey, position: positionPda,
-        traderTokenAccount: traderAta, vaultTokenAccount: vaultTokenAta,
-        tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+      .openPosition(assetId, new BN(tradeId), new BN(100_000_000), 10, {
+        long: {},
       })
-      .signers([trader]).rpc();
-
-    const traderBefore = (await provider.connection.getTokenAccountBalance(traderAta)).value.uiAmount!;
-    const vaultBefore  = (await provider.connection.getTokenAccountBalance(vaultTokenAta)).value.uiAmount!;
-
-    // Use liquidate_position — price collapsed to $1, well below liquidation threshold
-    await coreProgram.methods
-      .liquidatePosition(assetId, new BN(tradeId))
       .accountsPartial({
-        liquidator: admin.publicKey,
         trader: trader.publicKey,
-        config: configPda, asset: assetPda,
-        position: positionPda, pythPriceUpdate: oracle1.publicKey,
-        vaultTokenAccount: vaultTokenAta, traderTokenAccount: traderAta,
-        settlementAuthority: settlementAuthorityPda, coreCollateralToken: coreCollateralAta,
-        vaultProgram: vaultProgram.programId, vaultState: vaultStatePda,
+        config: configPda,
+        asset: assetPda,
+        pythPriceUpdate: oracle60.publicKey,
+        position: positionPda,
+        traderTokenAccount: traderAta,
+        vaultTokenAccount: vaultTokenAta,
+        vaultState: vaultStatePda,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
         tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
       })
+      .signers([trader])
       .rpc();
 
-    const traderAfter = (await provider.connection.getTokenAccountBalance(traderAta)).value.uiAmount!;
-    const vaultAfter  = (await provider.connection.getTokenAccountBalance(vaultTokenAta)).value.uiAmount!;
-    // Trader gains nothing — full collateral lost
-    assert.ok(traderAfter <= traderBefore, "trader should receive nothing on liquidation");
-    // Vault gains the full collateral
-    assert.ok(vaultAfter  >= vaultBefore,  "vault should gain collateral from liquidation");
+    const traderBefore = (
+      await provider.connection.getTokenAccountBalance(traderAta)
+    ).value.uiAmount!;
+
+    // Toggle protocol to paused to allow emergency close
+    await coreProgram.methods
+      .toggleProtocolStatus(true)
+      .accountsPartial({ config: configPda, admin: admin.publicKey })
+      .rpc();
+
+    // Emergency close
+    await coreProgram.methods
+      .emergencyClose(assetId, new BN(tradeId))
+      .accountsPartial({
+        trader: trader.publicKey,
+        config: configPda,
+        asset: assetPda,
+        position: positionPda,
+        vaultTokenAccount: vaultTokenAta,
+        traderTokenAccount: traderAta,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
+        vaultState: vaultStatePda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .signers([trader])
+      .rpc();
+
+    const traderAfter = (
+      await provider.connection.getTokenAccountBalance(traderAta)
+    ).value.uiAmount!;
+    // In emergency close, trader gets back 100% of collateral (100 USDC since 0 bps commission)
+    assert.ok(
+      Math.abs(traderAfter - (traderBefore + 100)) < 0.01,
+      "trader should receive full net collateral on emergency close",
+    );
+
     const pos = await coreProgram.account.position.fetch(positionPda);
     assert.ok(
-      pos.state.hasOwnProperty("closed") || pos.state.hasOwnProperty("liquidated"),
-      "position should be settled"
+      pos.state.hasOwnProperty("emergencyClosed"),
+      "position state should be emergencyClosed",
     );
+
+    // Unpause for next tests
+    await coreProgram.methods
+      .toggleProtocolStatus(false)
+      .accountsPartial({ config: configPda, admin: admin.publicKey })
+      .rpc();
   });
 
   it("Test 8: Invalid oracle account rejected", async () => {
+    // Ensure protocol is unpaused in case Test 7 failed while paused
+    await coreProgram.methods
+      .toggleProtocolStatus(false)
+      .accountsPartial({ config: configPda, admin: admin.publicKey })
+      .rpc();
+
     // The mock-oracle feature bypasses the Pyth owner check for system-owned accounts.
     // To test oracle rejection, pass an account owned by the core program (assetPda).
     // The oracle code will NOT short-circuit (it's not system-owned), will try to
@@ -400,27 +513,35 @@ describe("brokex-core-lifecycle", () => {
     const positionPda = derivePositionPda(trader.publicKey, assetId, tradeId);
     try {
       await coreProgram.methods
-        .openPosition(assetId, new BN(tradeId), new BN(100_000_000), 10, { long: {} }, new BN(0), new BN(0))
+        .openPosition(assetId, new BN(tradeId), new BN(100_000_000), 10, {
+          long: {},
+        })
         .accountsPartial({
-          trader: trader.publicKey, config: configPda, asset: assetPda,
-          // assetPda is owned by the core program, not the system program
-          // → mock-oracle won't short-circuit → real parsing runs → fails
+          trader: trader.publicKey,
+          config: configPda,
+          asset: assetPda,
           pythPriceUpdate: assetPda,
           position: positionPda,
-          traderTokenAccount: traderAta, vaultTokenAccount: vaultTokenAta,
-          tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+          traderTokenAccount: traderAta,
+          vaultTokenAccount: vaultTokenAta,
+          vaultState: vaultStatePda,
+          settlementAuthority: settlementAuthorityPda,
+          vaultProgram: vaultProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
         })
-        .signers([trader]).rpc();
+        .signers([trader])
+        .rpc();
       assert.fail("Should have rejected bad oracle account");
     } catch (e: any) {
       if (e.message === "Should have rejected bad oracle account") throw e;
       // Any oracle error is acceptable: InvalidPrice, FeedIdMismatch, etc.
       const errStr = e.toString();
       const isOracleError =
-        errStr.includes("InvalidPrice")      ||
-        errStr.includes("FeedIdMismatch")    ||
-        errStr.includes("StalePrice")        ||
-        errStr.includes("InvalidOracleOwner")||
+        errStr.includes("InvalidPrice") ||
+        errStr.includes("FeedIdMismatch") ||
+        errStr.includes("StalePrice") ||
+        errStr.includes("InvalidOracleOwner") ||
         errStr.includes("0x177");
       assert.ok(isOracleError, `Expected oracle error, got: ${errStr}`);
     }
@@ -430,8 +551,21 @@ describe("brokex-core-lifecycle", () => {
     await coreProgram.methods.toggleProtocolStatus(true).accountsPartial({ config: configPda, admin: admin.publicKey }).rpc();
     try {
         await coreProgram.methods
-          .openPosition(assetId, new BN(99), new BN(100_000_000), 10, { long: {} }, new BN(0), new BN(0))
-          .accountsPartial({ trader: trader.publicKey, config: configPda, asset: assetPda, pythPriceUpdate: oracle60.publicKey, position: derivePositionPda(trader.publicKey, assetId, 99), traderTokenAccount: traderAta, vaultTokenAccount: vaultTokenAta })
+          .openPosition(assetId, new BN(99), new BN(100_000_000), 10, {
+            long: {},
+          })
+          .accountsPartial({
+            trader: trader.publicKey,
+            config: configPda,
+            asset: assetPda,
+            pythPriceUpdate: oracle60.publicKey,
+            position: derivePositionPda(trader.publicKey, assetId, 99),
+            traderTokenAccount: traderAta,
+            vaultTokenAccount: vaultTokenAta,
+            vaultState: vaultStatePda,
+            settlementAuthority: settlementAuthorityPda,
+            vaultProgram: vaultProgram.programId,
+          })
           .signers([trader])
           .rpc();
         assert.fail("Should have failed");
@@ -459,15 +593,7 @@ describe("brokex-core-lifecycle", () => {
 
     // Open Position A (2x)
     await coreProgram.methods
-      .openPosition(
-        assetId,
-        new BN(idA),
-        new BN(100_000_000),
-        2,
-        { long: {} },
-        new BN(0),
-        new BN(0),
-      )
+      .openPosition(assetId, new BN(idA), new BN(100_000_000), 2, { long: {} })
       .accountsPartial({
         trader: trader.publicKey,
         config: configPda,
@@ -476,6 +602,9 @@ describe("brokex-core-lifecycle", () => {
         position: pdaA,
         traderTokenAccount: traderAta,
         vaultTokenAccount: vaultTokenAta,
+        vaultState: vaultStatePda,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
@@ -484,15 +613,7 @@ describe("brokex-core-lifecycle", () => {
 
     // Open Position B (5x)
     await coreProgram.methods
-      .openPosition(
-        assetId,
-        new BN(idB),
-        new BN(100_000_000),
-        5,
-        { long: {} },
-        new BN(0),
-        new BN(0),
-      )
+      .openPosition(assetId, new BN(idB), new BN(100_000_000), 5, { long: {} })
       .accountsPartial({
         trader: trader.publicKey,
         config: configPda,
@@ -501,6 +622,9 @@ describe("brokex-core-lifecycle", () => {
         position: pdaB,
         traderTokenAccount: traderAta,
         vaultTokenAccount: vaultTokenAta,
+        vaultState: vaultStatePda,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
@@ -527,7 +651,6 @@ describe("brokex-core-lifecycle", () => {
         vaultTokenAccount: vaultTokenAta,
         traderTokenAccount: traderAta,
         settlementAuthority: settlementAuthorityPda,
-        coreCollateralToken: coreCollateralAta,
         vaultProgram: vaultProgram.programId,
         vaultState: vaultStatePda,
         tokenProgram: TOKEN_PROGRAM_ID,
@@ -557,7 +680,6 @@ describe("brokex-core-lifecycle", () => {
         vaultTokenAccount: vaultTokenAta,
         traderTokenAccount: traderAta,
         settlementAuthority: settlementAuthorityPda,
-        coreCollateralToken: coreCollateralAta,
         vaultProgram: vaultProgram.programId,
         vaultState: vaultStatePda,
         tokenProgram: TOKEN_PROGRAM_ID,

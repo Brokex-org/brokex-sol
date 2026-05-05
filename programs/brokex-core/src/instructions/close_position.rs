@@ -1,12 +1,11 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Token, TokenAccount};
+use anchor_spl::token::{Token, TokenAccount};
 use brokex_vault::cpi::{accounts::VaultSettle, settle};
 use brokex_vault::program::BrokexVault;
 use brokex_vault::VaultState;
 
 use crate::constants::*;
 use crate::error::CoreError;
-use crate::logic::{self, PRECISION};
 use crate::oracle;
 use crate::state::*;
 
@@ -61,13 +60,6 @@ pub struct ClosePosition<'info> {
     #[account(seeds = [SETTLEMENT_SEED], bump)]
     pub settlement_authority: UncheckedAccount<'info>,
 
-    #[account(
-        mut,
-        constraint = core_collateral_token.owner == settlement_authority.key(),
-        constraint = core_collateral_token.mint == config.usdc_mint
-    )]
-    pub core_collateral_token: Account<'info, TokenAccount>,
-
     pub vault_program: Program<'info, BrokexVault>,
 
     #[account(
@@ -75,6 +67,7 @@ pub struct ClosePosition<'info> {
         seeds = [b"vault"],
         bump,
         seeds::program = vault_program.key(),
+        constraint = vault_state.key() == config.vault_state @ CoreError::Unauthorized,
         constraint = vault_state.token_vault == vault_token_account.key(),
         constraint = vault_state.core == settlement_authority.key(),
     )]
@@ -150,6 +143,7 @@ pub struct LiquidatePosition<'info> {
         seeds = [b"vault"],
         bump,
         seeds::program = vault_program.key(),
+        constraint = vault_state.key() == config.vault_state @ CoreError::Unauthorized,
     )]
     pub vault_state: Box<Account<'info, VaultState>>,
 
@@ -173,95 +167,73 @@ pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String, _tr
         200,
     )?;
 
-    let asset = &ctx.accounts.asset;
-    let position = &ctx.accounts.position;
+    let asset = &mut ctx.accounts.asset;
 
-    // Exit spread uses OI **before** unwind
-    let close_price = logic::apply_spread_close(
-        oracle_price,
-        position.direction,
-        asset.oi_long,
-        asset.oi_short,
-        asset.base_spread_bps,
-    );
+    // MVP: No Spread
+    let close_price = oracle_price;
 
-    let (final_state, vault_pay_trader, _is_liq) = calculate_settlement(position, close_price, 0)?;
+    // Capture data from position to avoid borrow checker issues later
+    let (pos_direction, pos_size) = (ctx.accounts.position.direction, ctx.accounts.position.size);
+
+    // Capital Unlocking Logic 
+    let locked_before = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);
     
-    require!(!_is_liq, CoreError::Overflow); // Trader should use liquidate_position if insolvent
+    let (new_lp_locked_long, new_lp_locked_short) = if pos_direction == PositionDirection::Long {
+        (asset.lp_locked_long.saturating_sub(pos_size), asset.lp_locked_short)
+    } else {
+        (asset.lp_locked_long, asset.lp_locked_short.saturating_sub(pos_size))
+    };
+    let locked_after = std::cmp::max(new_lp_locked_long, new_lp_locked_short);
+    let delta_unlocked = locked_before.saturating_sub(locked_after);
 
-    unwind_asset_open_interest(&mut ctx.accounts.asset, position)?;
-
+    // Settlement Calculation 
+    let (final_state, vault_pay_trader, trader_pay_vault) = calculate_settlement(&ctx.accounts.position, close_price)?;
+    
+    // Internal state updates
+    unwind_asset_open_interest(asset, &ctx.accounts.position)?;
+    
     let ts = Clock::get()?.unix_timestamp;
     let pm = &mut ctx.accounts.position;
     pm.close_price = close_price;
     pm.close_time = ts;
     pm.state = final_state;
 
-    if vault_pay_trader > 0 {
-        require!(
-            ctx.accounts.vault_token_account.amount >= vault_pay_trader,
-            CoreError::InsufficientVaultLiquidity
+    let bump = ctx.bumps.settlement_authority;
+    let bump_seed = [bump];
+    let signer_seeds: &[&[u8]] = &[SETTLEMENT_SEED, &bump_seed];
+    let signers: &[&[&[u8]]] = &[signer_seeds];
+
+    // Update Vault Locked Capital via CPI 
+    if delta_unlocked > 0 {
+        let cpi_accounts = brokex_vault::cpi::accounts::UpdateLockedCapital {
+            caller: ctx.accounts.settlement_authority.to_account_info(),
+            vault_state: ctx.accounts.vault_state.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.vault_program.to_account_info().key(),
+            cpi_accounts,
+            signers
         );
+        brokex_vault::cpi::update_locked_capital(cpi_ctx, -(delta_unlocked as i64))?;
+    }
 
-        let bump = ctx.bumps.settlement_authority;
-        let bump_seed = [bump];
-        let signer_seeds: &[&[u8]] = &[SETTLEMENT_SEED, &bump_seed];
-        let signers: &[&[&[u8]]] = &[signer_seeds];
-
+    // Settlement with Vault 
+    if vault_pay_trader > 0 || trader_pay_vault > 0 {
         let cpi_accounts = VaultSettle {
             caller: ctx.accounts.settlement_authority.to_account_info(),
             vault_state: ctx.accounts.vault_state.to_account_info(),
             vault_token: ctx.accounts.vault_token_account.to_account_info(),
             trader_token: ctx.accounts.trader_token_account.to_account_info(),
-            core_collateral_token: ctx.accounts.core_collateral_token.to_account_info(),
             token_program: ctx.accounts.token_program.to_account_info(),
         };
 
         let cpi_ctx =
-            CpiContext::new_with_signer(ctx.accounts.vault_program.key(), cpi_accounts, signers);
+            CpiContext::new_with_signer(ctx.accounts.vault_program.to_account_info().key(), cpi_accounts, signers);
 
-        settle(cpi_ctx, vault_pay_trader, 0)?;
+        settle(cpi_ctx, vault_pay_trader, trader_pay_vault)?;
     }
 
-    Ok(())
-}
-
-pub fn liquidate_position_handler(ctx: Context<LiquidatePosition>, asset_id: String, _trade_id: u64) -> Result<()> {
-    require!(
-        ctx.accounts.position.asset_id == asset_id,
-        CoreError::Unauthorized
-    );
-    require!(
-        ctx.accounts.position.state == PositionState::Open,
-        CoreError::PositionNotOpen
-    );
-
-    let oracle_price = oracle::get_validated_price(
-        &ctx.accounts.pyth_price_update,
-        &ctx.accounts.asset.pyth_feed.to_bytes(),
-        60,
-        200,
-    )?;
-
-    let position = &ctx.accounts.position;
-
-    // Liquidation uses mark price (oracle price) directly or with a penalty
-    let close_price = oracle_price;
-
-    let (final_state, _vault_pay_trader, is_liq) = calculate_settlement(position, close_price, 0)?;
-    
-    require!(is_liq, CoreError::Overflow); // Only allow liquidation if threshold is met
-
-    unwind_asset_open_interest(&mut ctx.accounts.asset, position)?;
-
-    let ts = Clock::get()?.unix_timestamp;
-    let pm = &mut ctx.accounts.position;
-    pm.close_price = close_price;
-    pm.close_time = ts;
-    pm.state = final_state;
-
-    // In a liquidation, vault_pay_trader is usually 0. 
-    // Liquidator rewards would be implemented here in a production system.
+    msg!("Position closed: ID={}, Price={}, Unlocked={}", asset_id, close_price, delta_unlocked);
 
     Ok(())
 }
@@ -269,64 +241,29 @@ pub fn liquidate_position_handler(ctx: Context<LiquidatePosition>, asset_id: Str
 fn calculate_settlement(
     position: &Position,
     close_price: u64,
-    funding_fee: u64,
-) -> Result<(PositionState, u64, bool)> {
-    let margin = position
-        .size
-        .checked_div(position.leverage as u64)
-        .ok_or(CoreError::Overflow)?;
-
-    let raw_pnl = signed_pnl(
+) -> Result<(PositionState, u64, u64)> {
+    let pnl = signed_pnl(
         position.size,
         position.entry_price,
         close_price,
         position.direction,
     )?;
 
-    let lp_cap = i128::from(position.lp_locked_capital);
-    let capped_pnl = if raw_pnl > lp_cap { lp_cap } else { raw_pnl };
-
-    let loss_u128 = if capped_pnl < 0 {
-        (-capped_pnl) as u128
+    if pnl >= 0 {
+        // Profitable: Trader gets full collateral + profit
+        let profit = u64::try_from(pnl).map_err(|_| error!(CoreError::Overflow))?;
+        let total = position.collateral.checked_add(profit).ok_or(CoreError::Overflow)?;
+        Ok((PositionState::Closed, total, 0))
     } else {
-        0u128
-    };
-
-    let liq_threshold = (margin as u128)
-        .checked_mul(logic::LIQ_THRESHOLD_BPS)
-        .ok_or(CoreError::Overflow)?
-        .checked_div(PRECISION)
-        .ok_or(CoreError::Overflow)?;
-
-    let is_liquidation = loss_u128
-        .checked_add(funding_fee as u128)
-        .ok_or(CoreError::Overflow)?
-        >= liq_threshold;
-
-    if is_liquidation {
-        return Ok((PositionState::Liquidated, 0, true));
-    }
-
-    let margin_after_funding = margin.saturating_sub(funding_fee);
-    if margin_after_funding == 0 {
-        return Ok((PositionState::Closed, 0, false));
-    }
-
-    if capped_pnl >= 0 {
-        let profit = u64::try_from(capped_pnl).map_err(|_| error!(CoreError::Overflow))?;
-        let total = margin_after_funding
-            .checked_add(profit)
-            .ok_or(CoreError::Overflow)?;
-        Ok((PositionState::Closed, total, false))
-    } else {
-        let loss = u64::try_from(-capped_pnl).map_err(|_| error!(CoreError::Overflow))?;
-        if loss >= margin_after_funding {
-            Ok((PositionState::Closed, 0, false))
+        // Loss: Deducted from collateral
+        let loss = u64::try_from(-pnl).map_err(|_| error!(CoreError::Overflow))?;
+        if loss >= position.collateral {
+            // Loss exceeds collateral: Vault gets full collateral, trader gets 0
+            Ok((PositionState::Closed, 0, position.collateral))
         } else {
-            let rem = margin_after_funding
-                .checked_sub(loss)
-                .ok_or(CoreError::Overflow)?;
-            Ok((PositionState::Closed, rem, false))
+            // Partial loss: Vault gets loss, trader gets remainder
+            let rem = position.collateral.checked_sub(loss).ok_or(CoreError::Overflow)?;
+            Ok((PositionState::Closed, rem, loss))
         }
     }
 }
@@ -361,31 +298,13 @@ fn unwind_asset_open_interest(asset: &mut Account<'_, Asset>, position: &Positio
         .ok_or(CoreError::Overflow)?;
 
     if position.direction == PositionDirection::Long {
-        asset.oi_long = asset
-            .oi_long
-            .checked_sub(position.size)
-            .ok_or(CoreError::Overflow)?;
-        asset.risk_long = asset
-            .risk_long
-            .checked_sub(position.lp_locked_capital)
-            .ok_or(CoreError::Overflow)?;
-        asset.sum_priced_oi_long = asset
-            .sum_priced_oi_long
-            .checked_sub(priced_oi)
-            .ok_or(CoreError::Overflow)?;
+        asset.oi_long = asset.oi_long.saturating_sub(position.size);
+        asset.lp_locked_long = asset.lp_locked_long.saturating_sub(position.size);
+        asset.sum_priced_oi_long = asset.sum_priced_oi_long.saturating_sub(priced_oi);
     } else {
-        asset.oi_short = asset
-            .oi_short
-            .checked_sub(position.size)
-            .ok_or(CoreError::Overflow)?;
-        asset.risk_short = asset
-            .risk_short
-            .checked_sub(position.lp_locked_capital)
-            .ok_or(CoreError::Overflow)?;
-        asset.sum_priced_oi_short = asset
-            .sum_priced_oi_short
-            .checked_sub(priced_oi)
-            .ok_or(CoreError::Overflow)?;
+        asset.oi_short = asset.oi_short.saturating_sub(position.size);
+        asset.lp_locked_short = asset.lp_locked_short.saturating_sub(position.size);
+        asset.sum_priced_oi_short = asset.sum_priced_oi_short.saturating_sub(priced_oi);
     }
 
     Ok(())

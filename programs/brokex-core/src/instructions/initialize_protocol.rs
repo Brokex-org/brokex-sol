@@ -23,7 +23,7 @@ pub fn initialize_protocol_handler(
     ctx: Context<InitializeProtocol>,
     usdc_mint: Pubkey,
     vault: Pubkey,
-    vault_program: Pubkey,
+    vault_state: Pubkey,
 ) -> Result<()> {
     let config = &mut ctx.accounts.config;
     config.admin = ctx.accounts.admin.key();
@@ -31,7 +31,7 @@ pub fn initialize_protocol_handler(
     config.is_paused = false;
     config.usdc_mint = usdc_mint;
     config.vault = vault;
-    config.vault_program = vault_program;
+    config.vault_state = vault_state;
     
     msg!("Protocol initialized with admin: {}", config.admin);
     Ok(())

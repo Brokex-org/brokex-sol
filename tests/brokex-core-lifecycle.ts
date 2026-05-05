@@ -450,4 +450,125 @@ describe("brokex-core-lifecycle", () => {
         // Expected
     }
   });
+
+  it("Test 11: Concurrent positions for same asset are isolated", async () => {
+    const idA = 110;
+    const idB = 111;
+    const pdaA = derivePositionPda(trader.publicKey, assetId, idA);
+    const pdaB = derivePositionPda(trader.publicKey, assetId, idB);
+
+    // Open Position A (2x)
+    await coreProgram.methods
+      .openPosition(
+        assetId,
+        new BN(idA),
+        new BN(100_000_000),
+        2,
+        { long: {} },
+        new BN(0),
+        new BN(0),
+      )
+      .accountsPartial({
+        trader: trader.publicKey,
+        config: configPda,
+        asset: assetPda,
+        pythPriceUpdate: oracle60.publicKey,
+        position: pdaA,
+        traderTokenAccount: traderAta,
+        vaultTokenAccount: vaultTokenAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([trader])
+      .rpc();
+
+    // Open Position B (5x)
+    await coreProgram.methods
+      .openPosition(
+        assetId,
+        new BN(idB),
+        new BN(100_000_000),
+        5,
+        { long: {} },
+        new BN(0),
+        new BN(0),
+      )
+      .accountsPartial({
+        trader: trader.publicKey,
+        config: configPda,
+        asset: assetPda,
+        pythPriceUpdate: oracle60.publicKey,
+        position: pdaB,
+        traderTokenAccount: traderAta,
+        vaultTokenAccount: vaultTokenAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([trader])
+      .rpc();
+
+    // Verify both are open with correct leverage
+    const stateA = await coreProgram.account.position.fetch(pdaA);
+    const stateB = await coreProgram.account.position.fetch(pdaB);
+    assert.ok(stateA.state.hasOwnProperty("open"));
+    assert.ok(stateB.state.hasOwnProperty("open"));
+    assert.equal(stateA.leverage, 2);
+    assert.equal(stateB.leverage, 5);
+
+    // Close Position A
+    await coreProgram.methods
+      .closePosition(assetId, new BN(idA))
+      .accountsPartial({
+        trader: trader.publicKey,
+        config: configPda,
+        asset: assetPda,
+        position: pdaA,
+        pythPriceUpdate: oracle70.publicKey,
+        vaultTokenAccount: vaultTokenAta,
+        traderTokenAccount: traderAta,
+        settlementAuthority: settlementAuthorityPda,
+        coreCollateralToken: coreCollateralAta,
+        vaultProgram: vaultProgram.programId,
+        vaultState: vaultStatePda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .signers([trader])
+      .rpc();
+
+    // Verify A is closed but B is still OPEN
+    const stateAAfter = await coreProgram.account.position.fetch(pdaA);
+    const stateBAfter = await coreProgram.account.position.fetch(pdaB);
+    assert.ok(stateAAfter.state.hasOwnProperty("closed"), "A should be closed");
+    assert.ok(
+      stateBAfter.state.hasOwnProperty("open"),
+      "B should still be open",
+    );
+    assert.equal(stateBAfter.leverage, 5, "B's data should be intact");
+
+    // Close Position B
+    await coreProgram.methods
+      .closePosition(assetId, new BN(idB))
+      .accountsPartial({
+        trader: trader.publicKey,
+        config: configPda,
+        asset: assetPda,
+        position: pdaB,
+        pythPriceUpdate: oracle70.publicKey,
+        vaultTokenAccount: vaultTokenAta,
+        traderTokenAccount: traderAta,
+        settlementAuthority: settlementAuthorityPda,
+        coreCollateralToken: coreCollateralAta,
+        vaultProgram: vaultProgram.programId,
+        vaultState: vaultStatePda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .signers([trader])
+      .rpc();
+
+    const stateBFinal = await coreProgram.account.position.fetch(pdaB);
+    assert.ok(
+      stateBFinal.state.hasOwnProperty("closed"),
+      "B should now be closed",
+    );
+  });
 });

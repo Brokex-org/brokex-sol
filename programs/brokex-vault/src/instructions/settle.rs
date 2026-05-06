@@ -6,10 +6,7 @@ use crate::error::ErrorCode;
 
 pub fn settle_handler(ctx: Context<VaultSettle>, profit: u64, loss: u64) -> Result<()> {
     require!(!ctx.accounts.vault_state.paused, ErrorCode::Paused);
-    require!(
-        profit == 0 || loss == 0,
-        ErrorCode::InvalidVaultValue
-    );
+    require!(!(profit > 0 && loss > 0), ErrorCode::InvalidVaultValue);
 
     let bump = ctx.accounts.vault_state.bump;
     let seeds: &[&[u8]] = &[b"vault", &[bump]];
@@ -34,11 +31,6 @@ pub fn settle_handler(ctx: Context<VaultSettle>, profit: u64, loss: u64) -> Resu
     }
 
     if loss > 0 {
-        require!(
-            loss <= ctx.accounts.core_collateral_token.amount,
-            ErrorCode::InsufficientBalance
-        );
-
         let cpi_accounts = Transfer {
             from: ctx.accounts.core_collateral_token.to_account_info(),
             to: ctx.accounts.vault_token.to_account_info(),
@@ -47,10 +39,7 @@ pub fn settle_handler(ctx: Context<VaultSettle>, profit: u64, loss: u64) -> Resu
         let cpi_ctx = CpiContext::new(ctx.accounts.token_program.key(), cpi_accounts);
         token::transfer(cpi_ctx, loss)?;
 
-        msg!(
-            "Vault received {} (raw units) loss from core collateral",
-            loss
-        );
+        msg!("Vault collected {} (raw units) loss from core collateral", loss);
     }
 
     Ok(())

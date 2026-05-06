@@ -38,4 +38,6 @@ pub enum CoreError {
     InvalidVaultProgram,
     #[msg("Vault has insufficient liquidity for settlement payout")]
     InsufficientVaultLiquidity,
+    #[msg("State invariant violated")]
+    InvariantViolation,
 }

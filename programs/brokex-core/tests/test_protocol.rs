@@ -68,17 +68,7 @@ fn test_protocol_flow() {
             asset_id: asset_id.clone(),
             pyth_feed,
             config_input: brokex_core::instructions::AssetConfigInput {
-                min_leverage: 1,
-                max_leverage: 100,
-                min_trade_size: 0,
                 commission_open_bps: 0,
-                base_spread_bps: 0,
-                max_open_interest: 1_000_000_000,
-                max_oi_per_trader: 1_000_000_000,
-                alpha_min: 0,
-                alpha_scale: 0,
-                k: 1,
-                profit_cap_bps: 10000,
             }
         }
         .data(),

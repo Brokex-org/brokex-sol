@@ -1,8 +1,8 @@
 /**
  * Integration tests for `brokex-core` (localnet via `anchor test`).
  */
-import * as anchor from "@anchor-lang/core";
-import { Program, AnchorProvider } from "@anchor-lang/core";
+import * as anchor from "@coral-xyz/anchor";
+import { Program, AnchorProvider } from "@coral-xyz/anchor";
 import {
   Keypair,
   PublicKey,
@@ -28,35 +28,25 @@ describe("brokex-core", () => {
 
   const [configPda] = PublicKey.findProgramAddressSync(
     [CONFIG_SEED],
-    program.programId,
+    program.programId
   );
 
   const assetId = "SOL/USD";
   const pythFeed = Keypair.generate().publicKey;
   const [assetPda] = PublicKey.findProgramAddressSync(
     [ASSET_SEED, Buffer.from(assetId)],
-    program.programId,
+    program.programId
   );
 
   const usdcMint = Keypair.generate();
   const vault = getAssociatedTokenAddressSync(
     configPda,
     usdcMint.publicKey,
-    true,
+    true
   );
 
   const configInput = {
-    minLeverage: new anchor.BN(1),
-    maxLeverage: new anchor.BN(100),
-    minTradeSize: new anchor.BN(10000000),
     commissionOpenBps: new anchor.BN(10),
-    baseSpreadBps: new anchor.BN(20),
-    maxOpenInterest: new anchor.BN(1000000000000),
-    maxOiPerTrader: new anchor.BN(100000000000),
-    alphaMin: new anchor.BN(500000),
-    alphaScale: new anchor.BN(1000000000),
-    k: new anchor.BN(100000000),
-    profitCapBps: new anchor.BN(5000),
   };
 
   it("initializes the protocol config", async () => {
@@ -72,6 +62,7 @@ describe("brokex-core", () => {
     const config = await program.account.protocolConfig.fetch(configPda);
     assert.equal(config.admin.toBase58(), admin.publicKey.toBase58());
     assert.isFalse(config.isPaused);
+    assert.equal(config.nextPositionId.toNumber(), 0);
     assert.isNull(config.pendingAdmin);
   });
 
@@ -164,7 +155,7 @@ describe("brokex-core", () => {
 
     const sig = await provider.connection.requestAirdrop(
       newAdmin.publicKey,
-      LAMPORTS_PER_SOL,
+      LAMPORTS_PER_SOL
     );
     await provider.connection.confirmTransaction(sig, "confirmed");
 
@@ -183,7 +174,7 @@ describe("brokex-core", () => {
     const rogue = Keypair.generate();
     const sig = await provider.connection.requestAirdrop(
       rogue.publicKey,
-      LAMPORTS_PER_SOL,
+      LAMPORTS_PER_SOL
     );
     await provider.connection.confirmTransaction(sig, "confirmed");
 
@@ -201,21 +192,22 @@ describe("brokex-core", () => {
         msg.includes("Unauthorized") ||
           msg.includes("2000") ||
           msg.includes("constraint"),
-        `Unexpected error: ${msg}`,
+        `Unexpected error: ${msg}`
       );
     }
   });
 
-  it("derives position PDA with tradeId", async () => {
-    const tradeId = new anchor.BN(42);
+  it("derives first position PDA from on-chain position id counter", async () => {
+    const config = await program.account.protocolConfig.fetch(configPda);
+    const firstPositionId = config.nextPositionId;
     const [positionPda] = PublicKey.findProgramAddressSync(
       [
         POSITION_SEED,
         admin.publicKey.toBuffer(),
         Buffer.from(assetId),
-        tradeId.toArrayLike(Buffer, "le", 8),
+        firstPositionId.toArrayLike(Buffer, "le", 8),
       ],
-      program.programId,
+      program.programId
     );
     assert.ok(positionPda);
   });

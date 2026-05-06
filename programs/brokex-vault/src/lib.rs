@@ -22,7 +22,8 @@ pub mod brokex_vault {
     use anchor_lang::prelude::{Context, Result};
     use super::{
         initialize_handler, set_paused_handler, deposit_handler, withdraw_handler, settle_handler,
-        AdminSetPaused, Initialize, VaultDeposit, VaultSettle, VaultWithdraw,
+        update_locked_capital_handler,
+        AdminSetPaused, Initialize, VaultDeposit, VaultSettle, VaultWithdraw, UpdateLockedCapital,
     };
 
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
@@ -43,5 +44,9 @@ pub mod brokex_vault {
 
     pub fn settle(ctx: Context<VaultSettle>, profit: u64, loss: u64) -> Result<()> {
         settle_handler(ctx, profit, loss)
+    }
+
+    pub fn update_locked_capital(ctx: Context<UpdateLockedCapital>, delta: i64) -> Result<()> {
+        update_locked_capital_handler(ctx, delta)
     }
 }

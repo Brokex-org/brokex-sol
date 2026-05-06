@@ -97,6 +97,8 @@ pub fn open_position_handler(
 
     // Basic Validations
     require!(leverage > 0, CoreError::Overflow);
+    require!(sl_price > 0, CoreError::InvalidSlTpValue);
+    require!(tp_price > 0, CoreError::InvalidSlTpValue);
     
     // Validate price using the oracle logic
     let oracle_price = oracle::get_validated_price(

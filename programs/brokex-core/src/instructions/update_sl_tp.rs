@@ -21,7 +21,10 @@ pub struct UpdateSlTp<'info> {
 
 pub fn update_sl_tp_handler(ctx: Context<UpdateSlTp>, _asset_id: String, _trade_id: u64, sl_price: u64, tp_price: u64) -> Result<()> {
     let position = &mut ctx.accounts.position;
-    
+
+    require!(sl_price > 0, CoreError::InvalidSlTpValue);
+    require!(tp_price > 0, CoreError::InvalidSlTpValue);
+
     position.sl_price = sl_price;
     position.tp_price = tp_price;
 

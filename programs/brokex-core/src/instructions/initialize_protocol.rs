@@ -29,6 +29,8 @@ pub fn initialize_protocol_handler(
     config.admin = ctx.accounts.admin.key();
     config.pending_admin = None;
     config.is_paused = false;
+    config.emergency_mode = false;
+    config.next_position_id = 0;
     config.usdc_mint = usdc_mint;
     config.vault = vault;
     config.vault_state = vault_state;

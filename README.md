@@ -10,10 +10,9 @@ Brokex operates on a **Book B model** — the protocol vault acts as the direct 
 
 Key mechanics:
 
-- Traders speculate on price movements using leverage; each listed asset defines its own minimum and maximum leverage (there is no single protocol-wide maximum)
+- Traders speculate on price movements using leverage
 - USDC is the sole settlement currency
-- The vault holds all liquidity and dynamically locks capital based on open interest imbalance
-- Spread and funding mechanisms incentivize traders to rebalance the system
+- The vault holds liquidity and locks capital based on open interest
 - Core and Vault are separate on-chain programs — trading logic is fully isolated from liquidity management
 
 ---
@@ -25,7 +24,7 @@ brokex-solana/
 ├── programs/
 │   ├── brokex-core/
 │   │   ├── src/
-│   │   │   ├── lib.rs                    # Program entry + instructions (initialize, assets, positions, liquidation)
+│   │   │   ├── lib.rs                    # Program entry + instructions (initialize, assets, positions)
 │   │   │   ├── constants.rs
 │   │   │   ├── error.rs
 │   │   │   ├── state.rs                  # Protocol config, assets, positions
@@ -40,7 +39,7 @@ brokex-solana/
 │   │   │       ├── update_admin.rs       # propose / accept admin
 │   │   │       ├── open_position.rs
 │   │   │       ├── close_position.rs
-│   │   │       └── liquidate_position.rs
+│   │   │       └── emergency_close.rs
 │   │   └── tests/                        # Rust integration tests (LiteSVM / program-test)
 │   └── brokex-vault/
 │       ├── src/
@@ -158,9 +157,6 @@ PYTH_XAU_USD=AtRCZhwikbMsDAEYgwHFuBzGQuRQUMAfYomMaKnkEGRS
 # USDC Mint (Devnet)
 USDC_MINT=4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU
 
-# Keeper Bot
-KEEPER_KEYPAIR=~/.config/solana/keeper.json
-KEEPER_INTERVAL_MS=5000
 ```
 
 > **Never commit your `.env` or wallet keypair file.**
@@ -223,7 +219,6 @@ yarn lint          # Prettier on JS/TS
 | Smart contracts    | Rust + Anchor 1.0.1                    |
 | Oracle             | Pyth Network                           |
 | Settlement token   | USDC (SPL)                             |
-| Off-chain keeper   | TypeScript + @solana/web3.js           |
 | Testing            | Anchor TS + Rust (`cargo test`, LiteSVM integration where enabled) |
 | Network            | Solana (Localnet / Devnet → Mainnet)   |
 
@@ -243,27 +238,15 @@ The protocol is split into two independently deployable programs:
 
 All trade execution uses Pyth price feeds directly — no AMM formula. Price confidence intervals and staleness are validated on every instruction.
 
-### Imbalance & Alpha
+### Locked Capital
 
-The protocol tracks long and short open interest per asset. Imbalance is measured as:
-
-```
-imbalance = |longOI - shortOI| / (longOI + shortOI)
-```
-
-The alpha coefficient dynamically controls how much vault capital is locked:
+The Core tracks long and short open interest per asset and computes effective locked capital as:
 
 ```
-alpha = alphaMin + (alphaMax - alphaMin) * (imbalance ^ K)
-needLock = max(longSideRisk, shortSideRisk) * alpha
+max(lp_locked_long, lp_locked_short)
 ```
 
-Trades are rejected if the resulting `needLock` exceeds available vault capital.
-
-### Spread & Funding
-
-- **Spread**: Traders opening on the dominant side receive worse pricing; the weaker side gets better pricing.
-- **Funding**: Paid to the protocol (not peer-to-peer). Higher imbalance contribution = higher funding rate.
+Trades are rejected if the resulting additional locked capital exceeds available vault free capital.
 
 ### Emergency Mode
 

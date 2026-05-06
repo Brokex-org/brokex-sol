@@ -137,6 +137,13 @@ pub struct VaultSettle<'info> {
 
     #[account(
         mut,
+        constraint = core_collateral_token.owner == caller.key() @ ErrorCode::InvalidVaultValue,
+        constraint = core_collateral_token.mint == vault_state.stable_mint @ ErrorCode::InvalidVaultValue,
+    )]
+    pub core_collateral_token: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
         constraint = trader_token.mint == vault_state.stable_mint @ ErrorCode::InvalidVaultValue,
     )]
     pub trader_token: Account<'info, TokenAccount>,

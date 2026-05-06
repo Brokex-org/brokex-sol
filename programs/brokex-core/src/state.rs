@@ -6,6 +6,7 @@ pub struct ProtocolConfig {
     pub admin: Pubkey,
     pub is_paused: bool,
     pub emergency_mode: bool,
+    pub next_position_id: u64,
     pub pending_admin: Option<Pubkey>,
     pub usdc_mint: Pubkey,
     pub vault: Pubkey,

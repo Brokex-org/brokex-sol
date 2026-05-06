@@ -6,8 +6,8 @@
  *
  * Provider wallet is `Anchor.toml` `[provider].wallet` (repo `keys/localnet-authority.json`).
  */
-import * as anchor from "@anchor-lang/core";
-import { Program, BN, AnchorError } from "@anchor-lang/core";
+import * as anchor from "@coral-xyz/anchor";
+import { Program, BN, AnchorError } from "@coral-xyz/anchor";
 import { expect } from "chai";
 import {
   Keypair,
@@ -134,7 +134,6 @@ describe("brokex_vault", () => {
       core.publicKey
     );
     coreCollateralAta = coreColInfo.address;
-
     await mintTo(conn, admin, mint, coreCollateralAta, admin.publicKey, RAW_50);
   });
 
@@ -168,12 +167,17 @@ describe("brokex_vault", () => {
     } catch {
       failed = true;
     }
-    expect(failed, "second initialize must fail (vault PDA already initialized)").to.be.true;
+    expect(
+      failed,
+      "second initialize must fail (vault PDA already initialized)"
+    ).to.be.true;
   });
 
   it("deposit — vault up, admin down", async () => {
-    const beforeVault = (await getAccount(provider.connection, vaultTokenAta)).amount;
-    const beforeAdmin = (await getAccount(provider.connection, adminAta)).amount;
+    const beforeVault = (await getAccount(provider.connection, vaultTokenAta))
+      .amount;
+    const beforeAdmin = (await getAccount(provider.connection, adminAta))
+      .amount;
 
     await program.methods
       .deposit(TEN)
@@ -185,7 +189,8 @@ describe("brokex_vault", () => {
       })
       .rpc();
 
-    const afterVault = (await getAccount(provider.connection, vaultTokenAta)).amount;
+    const afterVault = (await getAccount(provider.connection, vaultTokenAta))
+      .amount;
     const afterAdmin = (await getAccount(provider.connection, adminAta)).amount;
 
     expect(afterVault - beforeVault).to.equal(BigInt(TEN.toString()));
@@ -194,8 +199,10 @@ describe("brokex_vault", () => {
 
   it("withdraw — vault down, admin up (partial)", async () => {
     const withdrawAmt = new BN(3_000_000);
-    const beforeVault = (await getAccount(provider.connection, vaultTokenAta)).amount;
-    const beforeAdmin = (await getAccount(provider.connection, adminAta)).amount;
+    const beforeVault = (await getAccount(provider.connection, vaultTokenAta))
+      .amount;
+    const beforeAdmin = (await getAccount(provider.connection, adminAta))
+      .amount;
 
     await program.methods
       .withdraw(withdrawAmt)
@@ -207,7 +214,8 @@ describe("brokex_vault", () => {
       })
       .rpc();
 
-    const afterVault = (await getAccount(provider.connection, vaultTokenAta)).amount;
+    const afterVault = (await getAccount(provider.connection, vaultTokenAta))
+      .amount;
     const afterAdmin = (await getAccount(provider.connection, adminAta)).amount;
 
     expect(beforeVault - afterVault).to.equal(BigInt(withdrawAmt.toString()));
@@ -216,73 +224,86 @@ describe("brokex_vault", () => {
 
   it("settle — profit to trader", async () => {
     const profit = new BN(2_000_000);
-    const beforeVault = (await getAccount(provider.connection, vaultTokenAta)).amount;
-    const beforeTrader = (await getAccount(provider.connection, traderAta)).amount;
+    const beforeVault = (await getAccount(provider.connection, vaultTokenAta))
+      .amount;
+    const beforeTrader = (await getAccount(provider.connection, traderAta))
+      .amount;
 
     await program.methods
       .settle(profit, new BN(0))
       .accountsPartial({
         caller: core.publicKey,
+        vaultState: vaultStatePda,
         vaultToken: vaultTokenAta,
-        traderToken: traderAta,
         coreCollateralToken: coreCollateralAta,
+        traderToken: traderAta,
         tokenProgram: TOKEN_PROGRAM_ID,
       })
       .signers([core])
       .rpc();
 
-    const afterVault = (await getAccount(provider.connection, vaultTokenAta)).amount;
-    const afterTrader = (await getAccount(provider.connection, traderAta)).amount;
+    const afterVault = (await getAccount(provider.connection, vaultTokenAta))
+      .amount;
+    const afterTrader = (await getAccount(provider.connection, traderAta))
+      .amount;
 
     expect(beforeVault - afterVault).to.equal(BigInt(profit.toString()));
     expect(afterTrader - beforeTrader).to.equal(BigInt(profit.toString()));
   });
 
-  it("settle — loss from core collateral into vault", async () => {
+  it("settle — loss collected from core collateral", async () => {
     const loss = new BN(4_000_000);
-    const beforeVault = (await getAccount(provider.connection, vaultTokenAta)).amount;
-    const beforeCoreCol = (await getAccount(provider.connection, coreCollateralAta)).amount;
+    const beforeVault = (await getAccount(provider.connection, vaultTokenAta))
+      .amount;
+    const beforeCoreCol = (
+      await getAccount(provider.connection, coreCollateralAta)
+    ).amount;
 
     await program.methods
       .settle(new BN(0), loss)
       .accountsPartial({
         caller: core.publicKey,
+        vaultState: vaultStatePda,
         vaultToken: vaultTokenAta,
-        traderToken: traderAta,
         coreCollateralToken: coreCollateralAta,
+        traderToken: traderAta,
         tokenProgram: TOKEN_PROGRAM_ID,
       })
       .signers([core])
       .rpc();
 
-    const afterVault = (await getAccount(provider.connection, vaultTokenAta)).amount;
-    const afterCoreCol = (await getAccount(provider.connection, coreCollateralAta)).amount;
-
+    const afterVault = (await getAccount(provider.connection, vaultTokenAta))
+      .amount;
+    const afterCoreCol = (
+      await getAccount(provider.connection, coreCollateralAta)
+    ).amount;
     expect(afterVault - beforeVault).to.equal(BigInt(loss.toString()));
     expect(beforeCoreCol - afterCoreCol).to.equal(BigInt(loss.toString()));
   });
 
   it("settle — break-even (no transfers)", async () => {
-    const beforeVault = (await getAccount(provider.connection, vaultTokenAta)).amount;
-    const beforeTrader = (await getAccount(provider.connection, traderAta)).amount;
-    const beforeCoreCol = (await getAccount(provider.connection, coreCollateralAta)).amount;
-
+    const beforeVault = (await getAccount(provider.connection, vaultTokenAta))
+      .amount;
+    const beforeTrader = (await getAccount(provider.connection, traderAta))
+      .amount;
     await program.methods
       .settle(new BN(0), new BN(0))
       .accountsPartial({
         caller: core.publicKey,
+        vaultState: vaultStatePda,
         vaultToken: vaultTokenAta,
-        traderToken: traderAta,
         coreCollateralToken: coreCollateralAta,
+        traderToken: traderAta,
         tokenProgram: TOKEN_PROGRAM_ID,
       })
       .signers([core])
       .rpc();
 
-    expect((await getAccount(provider.connection, vaultTokenAta)).amount).to.equal(beforeVault);
-    expect((await getAccount(provider.connection, traderAta)).amount).to.equal(beforeTrader);
-    expect((await getAccount(provider.connection, coreCollateralAta)).amount).to.equal(
-      beforeCoreCol
+    expect(
+      (await getAccount(provider.connection, vaultTokenAta)).amount
+    ).to.equal(beforeVault);
+    expect((await getAccount(provider.connection, traderAta)).amount).to.equal(
+      beforeTrader
     );
   });
 
@@ -333,9 +354,21 @@ describe("brokex_vault", () => {
         TOKEN_PROGRAM_ID
       );
       const wrongAta = (
-        await getOrCreateAssociatedTokenAccount(conn, admin, wrongMint, admin.publicKey)
+        await getOrCreateAssociatedTokenAccount(
+          conn,
+          admin,
+          wrongMint,
+          admin.publicKey
+        )
       ).address;
-      await mintTo(conn, admin, wrongMint, wrongAta, admin.publicKey, BigInt(10_000_000));
+      await mintTo(
+        conn,
+        admin,
+        wrongMint,
+        wrongAta,
+        admin.publicKey,
+        BigInt(10_000_000)
+      );
 
       try {
         await program.methods
@@ -366,9 +399,21 @@ describe("brokex_vault", () => {
         TOKEN_PROGRAM_ID
       );
       const wrongAta = (
-        await getOrCreateAssociatedTokenAccount(conn, admin, wrongMint, admin.publicKey)
+        await getOrCreateAssociatedTokenAccount(
+          conn,
+          admin,
+          wrongMint,
+          admin.publicKey
+        )
       ).address;
-      await mintTo(conn, admin, wrongMint, wrongAta, admin.publicKey, BigInt(10_000_000));
+      await mintTo(
+        conn,
+        admin,
+        wrongMint,
+        wrongAta,
+        admin.publicKey,
+        BigInt(10_000_000)
+      );
 
       try {
         await program.methods
@@ -405,7 +450,8 @@ describe("brokex_vault", () => {
     });
 
     it("withdraw — amount exceeds vault balance → InsufficientBalance", async () => {
-      const vaultBal = (await getAccount(provider.connection, vaultTokenAta)).amount;
+      const vaultBal = (await getAccount(provider.connection, vaultTokenAta))
+        .amount;
       const tooMuch = new BN(vaultBal.toString()).add(new BN(1));
       try {
         await program.methods
@@ -463,9 +509,10 @@ describe("brokex_vault", () => {
           .settle(new BN(1), new BN(0))
           .accountsPartial({
             caller: trader.publicKey,
+            vaultState: vaultStatePda,
             vaultToken: vaultTokenAta,
-            traderToken: traderAta,
             coreCollateralToken: coreCollateralAta,
+            traderToken: traderAta,
             tokenProgram: TOKEN_PROGRAM_ID,
           })
           .signers([trader])
@@ -477,16 +524,18 @@ describe("brokex_vault", () => {
     });
 
     it("settle — profit exceeds vault balance → InsufficientBalance", async () => {
-      const vaultBal = (await getAccount(provider.connection, vaultTokenAta)).amount;
+      const vaultBal = (await getAccount(provider.connection, vaultTokenAta))
+        .amount;
       const tooMuch = new BN(vaultBal.toString()).add(new BN(1));
       try {
         await program.methods
           .settle(tooMuch, new BN(0))
           .accountsPartial({
             caller: core.publicKey,
+            vaultState: vaultStatePda,
             vaultToken: vaultTokenAta,
-            traderToken: traderAta,
             coreCollateralToken: coreCollateralAta,
+            traderToken: traderAta,
             tokenProgram: TOKEN_PROGRAM_ID,
           })
           .signers([core])
@@ -503,9 +552,10 @@ describe("brokex_vault", () => {
           .settle(new BN(1_000_000), new BN(1_000_000))
           .accountsPartial({
             caller: core.publicKey,
+            vaultState: vaultStatePda,
             vaultToken: vaultTokenAta,
-            traderToken: traderAta,
             coreCollateralToken: coreCollateralAta,
+            traderToken: traderAta,
             tokenProgram: TOKEN_PROGRAM_ID,
           })
           .signers([core])
@@ -559,9 +609,10 @@ describe("brokex_vault", () => {
           .settle(new BN(0), new BN(0))
           .accountsPartial({
             caller: core.publicKey,
+            vaultState: vaultStatePda,
             vaultToken: vaultTokenAta,
-            traderToken: traderAta,
             coreCollateralToken: coreCollateralAta,
+            traderToken: traderAta,
             tokenProgram: TOKEN_PROGRAM_ID,
           })
           .signers([core])

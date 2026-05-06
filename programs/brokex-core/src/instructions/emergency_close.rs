@@ -1,6 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{Token, TokenAccount};
-use brokex_vault::cpi::{accounts::VaultSettle, settle};
+use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 use brokex_vault::program::BrokexVault;
 use brokex_vault::VaultState;
 
@@ -51,6 +50,13 @@ pub struct EmergencyClose<'info> {
     )]
     pub trader_token_account: Account<'info, TokenAccount>,
 
+    #[account(
+        mut,
+        constraint = core_collateral_token.owner == settlement_authority.key(),
+        constraint = core_collateral_token.mint == config.usdc_mint
+    )]
+    pub core_collateral_token: Account<'info, TokenAccount>,
+
     /// CHECK: PDA signer for vault CPI; must match `VaultState.core`.
     #[account(seeds = [SETTLEMENT_SEED], bump)]
     pub settlement_authority: UncheckedAccount<'info>,
@@ -82,13 +88,31 @@ pub fn emergency_close_handler(ctx: Context<EmergencyClose>, asset_id: String, _
     
     // Unwind Asset state
     if pos_direction == PositionDirection::Long {
-        asset.oi_long = asset.oi_long.saturating_sub(pos_size);
-        asset.lp_locked_long = asset.lp_locked_long.saturating_sub(pos_size);
-        asset.sum_priced_oi_long = asset.sum_priced_oi_long.saturating_sub(priced_oi);
+        asset.oi_long = asset
+            .oi_long
+            .checked_sub(pos_size)
+            .ok_or(CoreError::InvariantViolation)?;
+        asset.lp_locked_long = asset
+            .lp_locked_long
+            .checked_sub(pos_size)
+            .ok_or(CoreError::InvariantViolation)?;
+        asset.sum_priced_oi_long = asset
+            .sum_priced_oi_long
+            .checked_sub(priced_oi)
+            .ok_or(CoreError::InvariantViolation)?;
     } else {
-        asset.oi_short = asset.oi_short.saturating_sub(pos_size);
-        asset.lp_locked_short = asset.lp_locked_short.saturating_sub(pos_size);
-        asset.sum_priced_oi_short = asset.sum_priced_oi_short.saturating_sub(priced_oi);
+        asset.oi_short = asset
+            .oi_short
+            .checked_sub(pos_size)
+            .ok_or(CoreError::InvariantViolation)?;
+        asset.lp_locked_short = asset
+            .lp_locked_short
+            .checked_sub(pos_size)
+            .ok_or(CoreError::InvariantViolation)?;
+        asset.sum_priced_oi_short = asset
+            .sum_priced_oi_short
+            .checked_sub(priced_oi)
+            .ok_or(CoreError::InvariantViolation)?;
     }
 
     let locked_after = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);
@@ -118,25 +142,22 @@ pub fn emergency_close_handler(ctx: Context<EmergencyClose>, asset_id: String, _
         brokex_vault::cpi::update_locked_capital(cpi_ctx, -(delta_unlocked as i64))?;
     }
 
-    // Return 100% of collateral 
-    let vault_pay_trader = pos_collateral;
-
-    if vault_pay_trader > 0 {
-        let cpi_accounts = VaultSettle {
-            caller: ctx.accounts.settlement_authority.to_account_info(),
-            vault_state: ctx.accounts.vault_state.to_account_info(),
-            vault_token: ctx.accounts.vault_token_account.to_account_info(),
-            trader_token: ctx.accounts.trader_token_account.to_account_info(),
-            token_program: ctx.accounts.token_program.to_account_info(),
+    // Return 100% of collateral from Core custody. No oracle/PnL and no Vault settlement.
+    if pos_collateral > 0 {
+        let cpi_accounts = Transfer {
+            from: ctx.accounts.core_collateral_token.to_account_info(),
+            to: ctx.accounts.trader_token_account.to_account_info(),
+            authority: ctx.accounts.settlement_authority.to_account_info(),
         };
-
-        let cpi_ctx =
-            CpiContext::new_with_signer(ctx.accounts.vault_program.to_account_info().key(), cpi_accounts, signers);
-
-        settle(cpi_ctx, vault_pay_trader, 0)?;
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info().key(),
+            cpi_accounts,
+            signers,
+        );
+        token::transfer(cpi_ctx, pos_collateral)?;
     }
 
-    msg!("Emergency position closed: ID={}, Returned={}", asset_id, vault_pay_trader);
+    msg!("Emergency position closed: ID={}, Returned={}", asset_id, pos_collateral);
 
     Ok(())
 }

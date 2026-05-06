@@ -6,17 +6,18 @@ use crate::oracle;
 use crate::error::CoreError;
 
 #[derive(Accounts)]
-#[instruction(asset_id: String, trade_id: u64)]
+#[instruction(asset_id: String)]
 pub struct OpenPosition<'info> {
     #[account(mut)]
     pub trader: Signer<'info>,
 
     #[account(
+        mut,
         seeds = [CONFIG_SEED],
         bump,
         constraint = !config.is_paused @ CoreError::Paused
     )]
-    pub config: Account<'info, ProtocolConfig>,
+    pub config: Box<Account<'info, ProtocolConfig>>,
 
     #[account(
         mut,
@@ -24,12 +25,12 @@ pub struct OpenPosition<'info> {
         bump,
         constraint = asset.is_enabled @ CoreError::AssetDisabled
     )]
-    pub asset: Account<'info, Asset>,
+    pub asset: Box<Account<'info, Asset>>,
 
     /// CHECK: Validated in oracle::get_validated_price
     pub pyth_price_update: UncheckedAccount<'info>,
 
-    /// Position PDA: Supports multiple positions per trader per asset via `trade_id`.
+    /// Position PDA: Supports multiple positions per trader per asset via global position id.
     #[account(
         init,
         payer = trader,
@@ -38,11 +39,11 @@ pub struct OpenPosition<'info> {
             POSITION_SEED, 
             trader.key().as_ref(), 
             asset_id.as_bytes(), 
-            trade_id.to_le_bytes().as_ref()
+            config.next_position_id.to_le_bytes().as_ref()
         ],
         bump
     )]
-    pub position: Account<'info, Position>,
+    pub position: Box<Account<'info, Position>>,
 
     #[account(
         mut,
@@ -60,9 +61,16 @@ pub struct OpenPosition<'info> {
 
     #[account(
         mut,
+        constraint = core_collateral_token.owner == settlement_authority.key(),
+        constraint = core_collateral_token.mint == config.usdc_mint
+    )]
+    pub core_collateral_token: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
         constraint = vault_state.key() == config.vault_state @ CoreError::Unauthorized,
     )]
-    pub vault_state: Account<'info, brokex_vault::state::VaultState>,
+    pub vault_state: Box<Account<'info, brokex_vault::state::VaultState>>,
 
     /// CHECK: PDA signer for vault CPI; must match `VaultState.core`.
     #[account(seeds = [SETTLEMENT_SEED], bump)]
@@ -76,11 +84,11 @@ pub struct OpenPosition<'info> {
 pub fn open_position_handler(
     ctx: Context<OpenPosition>,
     asset_id: String,
-    trade_id: u64,
     collateral: u64,
     leverage: u8,
     direction: PositionDirection,
 ) -> Result<()> {
+    let position_id = ctx.accounts.config.next_position_id;
     let asset = &mut ctx.accounts.asset;
 
     // Basic Validations
@@ -127,14 +135,29 @@ pub fn open_position_handler(
     
     require!(free_capital >= delta_locked, CoreError::InsufficientVaultLiquidity);
 
-    // Transfer Collateral (Total collateral including commission goes to Vault)
-    let cpi_accounts = Transfer {
-        from: ctx.accounts.trader_token_account.to_account_info(),
-        to: ctx.accounts.vault_token_account.to_account_info(),
-        authority: ctx.accounts.trader.to_account_info(),
-    };
-    let cpi_ctx = CpiContext::new(ctx.accounts.token_program.to_account_info().key(), cpi_accounts);
-    token::transfer(cpi_ctx, collateral)?;
+    // Commission is transferred immediately to the Vault.
+    if commission > 0 {
+        let cpi_accounts = Transfer {
+            from: ctx.accounts.trader_token_account.to_account_info(),
+            to: ctx.accounts.vault_token_account.to_account_info(),
+            authority: ctx.accounts.trader.to_account_info(),
+        };
+        let cpi_ctx =
+            CpiContext::new(ctx.accounts.token_program.to_account_info().key(), cpi_accounts);
+        token::transfer(cpi_ctx, commission)?;
+    }
+
+    // Core holds the trader's net collateral (margin) while the position is open.
+    if margin > 0 {
+        let cpi_accounts = Transfer {
+            from: ctx.accounts.trader_token_account.to_account_info(),
+            to: ctx.accounts.core_collateral_token.to_account_info(),
+            authority: ctx.accounts.trader.to_account_info(),
+        };
+        let cpi_ctx =
+            CpiContext::new(ctx.accounts.token_program.to_account_info().key(), cpi_accounts);
+        token::transfer(cpi_ctx, margin)?;
+    }
 
     // Update Vault Locked Capital via CPI
     if delta_locked > 0 {
@@ -171,7 +194,7 @@ pub fn open_position_handler(
 
     // Store Position
     let position = &mut ctx.accounts.position;
-    position.trade_id = trade_id;
+    position.trade_id = position_id;
     position.trader = ctx.accounts.trader.key();
     position.asset_id = asset_id;
     position.direction = direction;
@@ -183,6 +206,7 @@ pub fn open_position_handler(
     position.state = PositionState::Open;
     position.open_time = Clock::get()?.unix_timestamp;
     position.bump = ctx.bumps.position;
+    ctx.accounts.config.next_position_id = position_id.checked_add(1).ok_or(CoreError::Overflow)?;
 
     msg!("Position opened: ID={}, Price={}, Size={}, Locked={}", position.asset_id, entry_price, oi, delta_locked);
 

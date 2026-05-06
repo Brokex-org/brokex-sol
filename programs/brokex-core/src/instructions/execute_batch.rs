@@ -4,6 +4,7 @@ use crate::state::*;
 use crate::constants::*;
 use crate::oracle;
 use crate::error::CoreError;
+use crate::logic::{calculate_liquidation_price, validate_sl_tp};
 use brokex_vault::cpi::{accounts::VaultSettle, settle};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
@@ -69,8 +70,11 @@ pub struct ExecuteBatch<'info> {
 pub fn execute_batch_handler<'info>(
     mut ctx: Context<'info, ExecuteBatch<'info>>,
     asset_id: String,
-    action_type: ActionType,
+    trade_ids: Vec<u64>,
+    action_types: Vec<ActionType>,
 ) -> Result<()> {
+    require!(trade_ids.len() == action_types.len(), CoreError::InvalidBatchInput);
+
     let oracle_price = oracle::get_validated_price(
         &ctx.accounts.pyth_price_update,
         &ctx.accounts.asset.pyth_feed.to_bytes(),
@@ -78,43 +82,60 @@ pub fn execute_batch_handler<'info>(
         200,
     )?;
 
-    // Iterate through remaining accounts (positions)
-    // For SL/TP/Close, we expect pairs: [Position, TraderTokenAccount]
-    // For ConditionalOpen, we just need [Position]
     let mut it = ctx.remaining_accounts.iter();
-    while let Some(position_info) = it.next() {
-        // Identify if we need a trader account for this action
-        let trader_token_account = if action_type != ActionType::ConditionalOrderExecute {
-            it.next() // Pull the next account as the trader account
+    for (trade_id, action_type) in trade_ids.into_iter().zip(action_types.into_iter()) {
+        let position_info = match it.next() {
+            Some(acc) => acc,
+            None => break,
+        };
+
+        let trader_token_account = if requires_trader_token(action_type) {
+            it.next()
         } else {
             None
         };
 
-        if let Err(e) = execute_single_trade(&mut ctx, &asset_id, action_type, position_info, trader_token_account, oracle_price) {
+        if let Err(e) = execute_single_trade(
+            &mut ctx,
+            &asset_id,
+            trade_id,
+            action_type,
+            position_info,
+            trader_token_account,
+            oracle_price,
+        ) {
             msg!("Skipping trade {}: {:?}", position_info.key(), e);
-            continue;
         }
     }
 
     Ok(())
 }
 
+fn requires_trader_token(action_type: ActionType) -> bool {
+    matches!(
+        action_type,
+        ActionType::StopLoss | ActionType::TakeProfit | ActionType::MarketClose | ActionType::Liquidation
+    )
+}
+
 fn execute_single_trade<'info>(
     ctx: &mut Context<'info, ExecuteBatch<'info>>,
     asset_id: &str,
+    trade_id: u64,
     action_type: ActionType,
     position_info: &AccountInfo<'info>,
     trader_token_account: Option<&AccountInfo<'info>>,
     oracle_price: u64,
 ) -> Result<()> {
-    //  Basic Account Validation
     let mut position = {
         let position_data = position_info.try_borrow_data()?;
         Position::try_deserialize(&mut position_data.as_ref())?
     };
 
-    // Verify seeds
-    let trade_id_bytes = position.trade_id.to_le_bytes();
+    require!(position.trade_id == trade_id, CoreError::Unauthorized);
+    require!(position.asset_id == asset_id, CoreError::Unauthorized);
+
+    let trade_id_bytes = trade_id.to_le_bytes();
     let seeds = [
         POSITION_SEED,
         position.trader.as_ref(),
@@ -124,11 +145,10 @@ fn execute_single_trade<'info>(
     let (expected_pda, _bump) = Pubkey::find_program_address(&seeds, ctx.program_id);
     require!(position_info.key() == expected_pda, CoreError::Unauthorized);
 
-    // Check Logic based on ActionType
     match action_type {
         ActionType::ConditionalOrderExecute => {
             require!(position.state == PositionState::Pending, CoreError::Unauthorized);
-            
+
             let can_execute = match position.order_type {
                 OrderType::Limit => {
                     if position.direction == PositionDirection::Long {
@@ -150,33 +170,52 @@ fn execute_single_trade<'info>(
             if !can_execute { return Err(CoreError::Unauthorized.into()); }
             execute_order_open(ctx, &mut position, position_info, oracle_price)?;
         },
-        ActionType::StopLoss | ActionType::TakeProfit | ActionType::MarketClose => {
+        ActionType::StopLoss | ActionType::TakeProfit | ActionType::MarketClose | ActionType::Liquidation => {
             require!(position.state == PositionState::Open, CoreError::Unauthorized);
             let trader_account = trader_token_account.ok_or(CoreError::Unauthorized)?;
-            
+
             let trigger = match action_type {
                 ActionType::StopLoss => {
-                    if position.direction == PositionDirection::Long {
+                    if position.sl_price == 0 {
+                        false
+                    } else if position.direction == PositionDirection::Long {
                         oracle_price <= position.sl_price
                     } else {
                         oracle_price >= position.sl_price
                     }
                 },
                 ActionType::TakeProfit => {
-                    if position.direction == PositionDirection::Long {
+                    if position.tp_price == 0 {
+                        false
+                    } else if position.direction == PositionDirection::Long {
                         oracle_price >= position.tp_price
                     } else {
                         oracle_price <= position.tp_price
                     }
                 },
+                ActionType::Liquidation => {
+                    if position.liquidation_price == 0 {
+                        false
+                    } else if position.direction == PositionDirection::Long {
+                        oracle_price <= position.liquidation_price
+                    } else {
+                        oracle_price >= position.liquidation_price
+                    }
+                }
                 ActionType::MarketClose => true,
                 _ => false,
             };
 
             if !trigger { return Err(CoreError::Unauthorized.into()); }
-            execute_order_close(ctx, &mut position, position_info, trader_account, oracle_price)?;
-        },
-        _ => return Err(CoreError::Unauthorized.into()),
+            execute_order_close(
+                ctx,
+                &mut position,
+                position_info,
+                trader_account,
+                oracle_price,
+                action_type == ActionType::Liquidation,
+            )?;
+        }
     }
 
     Ok(())
@@ -188,19 +227,19 @@ fn execute_order_open<'info>(
     position_info: &AccountInfo<'info>,
     execution_price: u64,
 ) -> Result<()> {
+    validate_sl_tp(execution_price, position.direction, position.sl_price, position.tp_price)?;
+
     let asset = &mut ctx.accounts.asset;
-    let collateral = position.collateral; 
-    
-    // Calculate Commission
+    let collateral = position.collateral;
+
     let commission = collateral
         .checked_mul(asset.commission_open_bps)
         .ok_or(CoreError::Overflow)?
         / 10_000;
-    
+
     let margin = collateral.saturating_sub(commission);
     let oi = margin.checked_mul(position.leverage as u64).ok_or(CoreError::Overflow)?;
 
-    // Capital Locking Logic
     let locked_before = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);
     let (new_lp_locked_long, new_lp_locked_short) = if position.direction == PositionDirection::Long {
         (asset.lp_locked_long.checked_add(oi).ok_or(CoreError::Overflow)?, asset.lp_locked_short)
@@ -210,7 +249,6 @@ fn execute_order_open<'info>(
     let locked_after = std::cmp::max(new_lp_locked_long, new_lp_locked_short);
     let delta_locked = locked_after.saturating_sub(locked_before);
 
-    // Verify Vault free liquidity
     let vault_balance = ctx.accounts.vault_token_account.amount;
     let free_capital = vault_balance.saturating_sub(ctx.accounts.vault_state.total_locked_capital);
     require!(free_capital >= delta_locked, CoreError::InsufficientVaultLiquidity);
@@ -220,7 +258,6 @@ fn execute_order_open<'info>(
     let signer_seeds: &[&[u8]] = &[SETTLEMENT_SEED, &bump_seed];
     let signers: &[&[&[u8]]] = &[signer_seeds];
 
-    // Transfer Commission from Core to Vault
     if commission > 0 {
         let cpi_accounts = Transfer {
             from: ctx.accounts.core_collateral_token.to_account_info(),
@@ -231,7 +268,6 @@ fn execute_order_open<'info>(
         token::transfer(cpi_ctx, commission)?;
     }
 
-    // Update Vault Locked Capital via CPI
     if delta_locked > 0 {
         let cpi_accounts = brokex_vault::cpi::accounts::UpdateLockedCapital {
             caller: ctx.accounts.settlement_authority.to_account_info(),
@@ -241,7 +277,6 @@ fn execute_order_open<'info>(
         brokex_vault::cpi::update_locked_capital(cpi_ctx, delta_locked as i64)?;
     }
 
-    // Update Asset State
     if position.direction == PositionDirection::Long {
         asset.oi_long = asset.oi_long.checked_add(oi).ok_or(CoreError::Overflow)?;
         asset.lp_locked_long = asset.lp_locked_long.checked_add(oi).ok_or(CoreError::Overflow)?;
@@ -254,15 +289,15 @@ fn execute_order_open<'info>(
         asset.sum_priced_oi_short = asset.sum_priced_oi_short.checked_add(priced_oi).ok_or(CoreError::Overflow)?;
     }
 
-    //  Update Position
     position.collateral = margin;
     position.size = oi;
     position.entry_price = execution_price;
+    position.liquidation_price = calculate_liquidation_price(execution_price, position.leverage, position.direction)?;
     position.lp_locked_capital = oi;
     position.state = PositionState::Open;
     position.execution_status = ExecutionStatus::Executed;
     position.open_time = Clock::get()?.unix_timestamp;
-    
+
     let mut data = position_info.try_borrow_mut_data()?;
     let mut writer: &mut [u8] = &mut data[8..];
     position.serialize(&mut writer)?;
@@ -276,10 +311,13 @@ fn execute_order_close<'info>(
     position_info: &AccountInfo<'info>,
     trader_token_account: &AccountInfo<'info>,
     execution_price: u64,
+    is_liquidation: bool,
 ) -> Result<()> {
     let pnl = signed_pnl(position.size, position.entry_price, execution_price, position.direction)?;
-    
-    let (vault_pay_trader_profit, vault_collect_loss, core_pay_trader) = if pnl >= 0 {
+
+    let (vault_pay_trader_profit, vault_collect_loss, core_pay_trader) = if is_liquidation {
+        (0, position.collateral, 0)
+    } else if pnl >= 0 {
         let profit = u64::try_from(pnl).map_err(|_| CoreError::Overflow)?;
         (profit, 0, position.collateral)
     } else {
@@ -291,7 +329,7 @@ fn execute_order_close<'info>(
 
     let asset = &mut ctx.accounts.asset;
     let locked_before = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);
-    
+
     let priced_oi = (position.size as u128).checked_mul(position.entry_price as u128).ok_or(CoreError::Overflow)?;
     if position.direction == PositionDirection::Long {
         asset.oi_long = asset.oi_long.saturating_sub(position.size);
@@ -311,7 +349,6 @@ fn execute_order_close<'info>(
     let signer_seeds: &[&[u8]] = &[SETTLEMENT_SEED, &bump_seed];
     let signers: &[&[&[u8]]] = &[signer_seeds];
 
-    // Unlock Capital in Vault
     if delta_unlocked > 0 {
         let cpi_accounts = brokex_vault::cpi::accounts::UpdateLockedCapital {
             caller: ctx.accounts.settlement_authority.to_account_info(),
@@ -321,7 +358,6 @@ fn execute_order_close<'info>(
         brokex_vault::cpi::update_locked_capital(cpi_ctx, -(delta_unlocked as i64))?;
     }
 
-    // Return Collateral from Core to Trader
     if core_pay_trader > 0 {
         let cpi_accounts = Transfer {
             from: ctx.accounts.core_collateral_token.to_account_info(),
@@ -332,7 +368,6 @@ fn execute_order_close<'info>(
         token::transfer(cpi_ctx, core_pay_trader)?;
     }
 
-    //  Vault Settlement (Profit payout or Loss collection)
     if vault_pay_trader_profit > 0 || vault_collect_loss > 0 {
         let cpi_accounts = VaultSettle {
             caller: ctx.accounts.settlement_authority.to_account_info(),
@@ -346,8 +381,11 @@ fn execute_order_close<'info>(
         settle(cpi_ctx, vault_pay_trader_profit, vault_collect_loss)?;
     }
 
-    // Update Position State
-    position.state = PositionState::Closed;
+    position.state = if is_liquidation {
+        PositionState::Liquidated
+    } else {
+        PositionState::Closed
+    };
     position.close_price = execution_price;
     position.close_time = Clock::get()?.unix_timestamp;
 

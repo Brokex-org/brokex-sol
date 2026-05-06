@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 use crate::state::*;
 use crate::constants::*;
 use crate::error::CoreError;
+use crate::logic::validate_sl_tp;
 
 #[derive(Accounts)]
 #[instruction(asset_id: String, trade_id: u64)]
@@ -21,9 +22,12 @@ pub struct UpdateSlTp<'info> {
 
 pub fn update_sl_tp_handler(ctx: Context<UpdateSlTp>, _asset_id: String, _trade_id: u64, sl_price: u64, tp_price: u64) -> Result<()> {
     let position = &mut ctx.accounts.position;
-
-    require!(sl_price > 0, CoreError::InvalidSlTpValue);
-    require!(tp_price > 0, CoreError::InvalidSlTpValue);
+    let reference_price = if position.state == PositionState::Open {
+        position.entry_price
+    } else {
+        position.target_price
+    };
+    validate_sl_tp(reference_price, position.direction, sl_price, tp_price)?;
 
     position.sl_price = sl_price;
     position.tp_price = tp_price;

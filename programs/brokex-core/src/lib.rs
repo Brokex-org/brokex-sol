@@ -115,8 +115,9 @@ pub mod brokex_core {
     pub fn execute_batch<'info>(
         ctx: Context<'info, ExecuteBatch<'info>>,
         asset_id: String,
-        action_type: ActionType,
+        trade_ids: Vec<u64>,
+        action_types: Vec<ActionType>,
     ) -> Result<()> {
-        instructions::execute_batch_handler(ctx, asset_id, action_type)
+        instructions::execute_batch_handler(ctx, asset_id, trade_ids, action_types)
     }
 }

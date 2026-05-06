@@ -108,8 +108,10 @@ fn execute_single_trade<'info>(
     oracle_price: u64,
 ) -> Result<()> {
     //  Basic Account Validation
-    let mut position_data: &[u8] = &position_info.try_borrow_data()?;
-    let mut position = Position::try_deserialize(&mut position_data)?;
+    let mut position = {
+        let position_data = position_info.try_borrow_data()?;
+        Position::try_deserialize(&mut position_data.as_ref())?
+    };
 
     // Verify seeds
     let trade_id_bytes = position.trade_id.to_le_bytes();
@@ -262,7 +264,8 @@ fn execute_order_open<'info>(
     position.open_time = Clock::get()?.unix_timestamp;
     
     let mut data = position_info.try_borrow_mut_data()?;
-    position.serialize(&mut *data)?;
+    let mut writer: &mut [u8] = &mut data[8..];
+    position.serialize(&mut writer)?;
 
     Ok(())
 }
@@ -349,7 +352,8 @@ fn execute_order_close<'info>(
     position.close_time = Clock::get()?.unix_timestamp;
 
     let mut data = position_info.try_borrow_mut_data()?;
-    position.serialize(&mut *data)?;
+    let mut writer: &mut [u8] = &mut data[8..];
+    position.serialize(&mut writer)?;
 
     Ok(())
 }

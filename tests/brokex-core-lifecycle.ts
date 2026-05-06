@@ -234,9 +234,16 @@ describe("brokex-core-lifecycle", () => {
     const tradeId = await currentPositionId();
     const positionPda = derivePositionPda(trader.publicKey, assetId, tradeId);
     await coreProgram.methods
-      .openPosition(assetId, new BN(100_000_000), 10, {
-        long: {},
-      })
+      .openPosition(
+        assetId,
+        new BN(100_000_000),
+        10,
+        { long: {} },
+        { market: {} },
+        new BN(0),
+        new BN(0),
+        new BN(0)
+      )
       .accountsPartial({
         trader: trader.publicKey,
         config: configPda,
@@ -263,7 +270,16 @@ describe("brokex-core-lifecycle", () => {
     const tradeId = await currentPositionId();
     const positionPda = derivePositionPda(trader.publicKey, assetId, tradeId);
     await coreProgram.methods
-      .openPosition(assetId, new BN(100_000_000), 10, { long: {} })
+      .openPosition(
+        assetId,
+        new BN(100_000_000),
+        10,
+        { long: {} },
+        { market: {} },
+        new BN(0),
+        new BN(0),
+        new BN(0)
+      )
       .accountsPartial({
         trader: trader.publicKey,
         config: configPda,
@@ -312,7 +328,16 @@ describe("brokex-core-lifecycle", () => {
     const tradeId = await currentPositionId();
     const positionPda = derivePositionPda(trader.publicKey, assetId, tradeId);
     await coreProgram.methods
-      .openPosition(assetId, new BN(100_000_000), 2, { long: {} })
+      .openPosition(
+        assetId,
+        new BN(100_000_000),
+        2,
+        { long: {} },
+        { market: {} },
+        new BN(0),
+        new BN(0),
+        new BN(0)
+      )
       .accountsPartial({
         trader: trader.publicKey,
         config: configPda,
@@ -374,9 +399,16 @@ describe("brokex-core-lifecycle", () => {
     const tradeId = await currentPositionId();
     const positionPda = derivePositionPda(trader.publicKey, assetId, tradeId);
     await coreProgram.methods
-      .openPosition(assetId, new BN(100_000_000), 10, {
-        long: {},
-      })
+      .openPosition(
+        assetId,
+        new BN(100_000_000),
+        10,
+        { long: {} },
+        { market: {} },
+        new BN(0),
+        new BN(0),
+        new BN(0)
+      )
       .accountsPartial({
         trader: trader.publicKey,
         config: configPda,
@@ -446,7 +478,16 @@ describe("brokex-core-lifecycle", () => {
     const idA = await currentPositionId();
     const pdaA = derivePositionPda(trader.publicKey, assetId, idA);
     await coreProgram.methods
-      .openPosition(assetId, new BN(100_000_000), 2, { long: {} })
+      .openPosition(
+        assetId,
+        new BN(100_000_000),
+        2,
+        { long: {} },
+        { market: {} },
+        new BN(0),
+        new BN(0),
+        new BN(0)
+      )
       .accountsPartial({
         trader: trader.publicKey,
         config: configPda,
@@ -468,7 +509,16 @@ describe("brokex-core-lifecycle", () => {
     const idB = await currentPositionId();
     const pdaB = derivePositionPda(trader.publicKey, assetId, idB);
     await coreProgram.methods
-      .openPosition(assetId, new BN(100_000_000), 5, { long: {} })
+      .openPosition(
+        assetId,
+        new BN(100_000_000),
+        5,
+        { long: {} },
+        { market: {} },
+        new BN(0),
+        new BN(0),
+        new BN(0)
+      )
       .accountsPartial({
         trader: trader.publicKey,
         config: configPda,
@@ -568,10 +618,12 @@ describe("brokex-core-lifecycle", () => {
         config: configPda,
         asset: assetPda,
         pythPriceUpdate: oracle50.publicKey,
+        vaultTokenAccount: vaultTokenAta,
         coreCollateralToken: coreCollateralAta,
         vaultState: vaultStatePda,
         settlementAuthority: settlementAuthorityPda,
         vaultProgram: vaultProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
       })
       .remainingAccounts([
         { pubkey: positionPda, isSigner: false, isWritable: true },

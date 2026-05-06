@@ -87,12 +87,18 @@ pub fn open_position_handler(
     collateral: u64,
     leverage: u8,
     direction: PositionDirection,
+    order_type: OrderType,
+    target_price: u64,
+    sl_price: u64,
+    tp_price: u64,
 ) -> Result<()> {
     let position_id = ctx.accounts.config.next_position_id;
     let asset = &mut ctx.accounts.asset;
 
     // Basic Validations
     require!(leverage > 0, CoreError::Overflow);
+    require!(sl_price > 0, CoreError::InvalidSlTpValue);
+    require!(tp_price > 0, CoreError::InvalidSlTpValue);
     
     // Validate price using the oracle logic
     let oracle_price = oracle::get_validated_price(
@@ -105,49 +111,34 @@ pub fn open_position_handler(
     // MVP: No Spread
     let entry_price = oracle_price;
 
-    // Calculate Commission
-    let commission = collateral
-        .checked_mul(asset.commission_open_bps)
-        .ok_or(CoreError::Overflow)?
-        / 10_000;
-    
-    let margin = collateral.saturating_sub(commission);
-    let oi = margin
-        .checked_mul(leverage as u64)
-        .ok_or(CoreError::Overflow)?;
+    // For Market orders, we charge commission and execute immediately.
+    // For Limit/Stop orders, we only transfer collateral; commission and execution happen later.
+    let is_market = order_type == OrderType::Market;
+    let mut margin = collateral;
 
-    // Capital Locking Logic 
-    let locked_before = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);
-    
-    let (new_lp_locked_long, new_lp_locked_short) = if direction == PositionDirection::Long {
-        (asset.lp_locked_long.checked_add(oi).ok_or(CoreError::Overflow)?, asset.lp_locked_short)
-    } else {
-        (asset.lp_locked_long, asset.lp_locked_short.checked_add(oi).ok_or(CoreError::Overflow)?)
-    };
-
-    let locked_after = std::cmp::max(new_lp_locked_long, new_lp_locked_short);
-    let delta_locked = locked_after.saturating_sub(locked_before);
-
-    // Trade Acceptance Rule 
-    // free_capital = vault_balance - total_locked_capital
-    let vault_balance = ctx.accounts.vault_token_account.amount;
-    let free_capital = vault_balance.saturating_sub(ctx.accounts.vault_state.total_locked_capital);
-    
-    require!(free_capital >= delta_locked, CoreError::InsufficientVaultLiquidity);
-
-    // Commission is transferred immediately to the Vault.
-    if commission > 0 {
-        let cpi_accounts = Transfer {
-            from: ctx.accounts.trader_token_account.to_account_info(),
-            to: ctx.accounts.vault_token_account.to_account_info(),
-            authority: ctx.accounts.trader.to_account_info(),
-        };
-        let cpi_ctx =
-            CpiContext::new(ctx.accounts.token_program.to_account_info().key(), cpi_accounts);
-        token::transfer(cpi_ctx, commission)?;
+    if is_market {
+        // Calculate Commission
+        let commission = collateral
+            .checked_mul(asset.commission_open_bps)
+            .ok_or(CoreError::Overflow)?
+            / 10_000;
+        
+        margin = collateral.saturating_sub(commission);
+        
+        // Transfer Commission to Vault
+        if commission > 0 {
+            let cpi_accounts = Transfer {
+                from: ctx.accounts.trader_token_account.to_account_info(),
+                to: ctx.accounts.vault_token_account.to_account_info(),
+                authority: ctx.accounts.trader.to_account_info(),
+            };
+            let cpi_ctx =
+                CpiContext::new(ctx.accounts.token_program.to_account_info().key(), cpi_accounts);
+            token::transfer(cpi_ctx, commission)?;
+        }
     }
 
-    // Core holds the trader's net collateral (margin) while the position is open.
+    // Core holds the trader's net collateral (margin) while the position is pending or open.
     if margin > 0 {
         let cpi_accounts = Transfer {
             from: ctx.accounts.trader_token_account.to_account_info(),
@@ -159,37 +150,67 @@ pub fn open_position_handler(
         token::transfer(cpi_ctx, margin)?;
     }
 
-    // Update Vault Locked Capital via CPI
-    if delta_locked > 0 {
-        let bump = ctx.bumps.settlement_authority;
-        let bump_seed = [bump];
-        let signer_seeds: &[&[u8]] = &[SETTLEMENT_SEED, &bump_seed];
-        let signers: &[&[&[u8]]] = &[signer_seeds];
+    let oi = margin
+        .checked_mul(leverage as u64)
+        .ok_or(CoreError::Overflow)?;
 
-        let cpi_accounts = brokex_vault::cpi::accounts::UpdateLockedCapital {
-            caller: ctx.accounts.settlement_authority.to_account_info(),
-            vault_state: ctx.accounts.vault_state.to_account_info(),
+    let mut delta_locked = 0;
+    let mut actual_entry_price = 0;
+
+    if is_market {
+        actual_entry_price = entry_price;
+
+        // Capital Locking Logic 
+        let locked_before = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);
+        
+        let (new_lp_locked_long, new_lp_locked_short) = if direction == PositionDirection::Long {
+            (asset.lp_locked_long.checked_add(oi).ok_or(CoreError::Overflow)?, asset.lp_locked_short)
+        } else {
+            (asset.lp_locked_long, asset.lp_locked_short.checked_add(oi).ok_or(CoreError::Overflow)?)
         };
-        let cpi_ctx = CpiContext::new_with_signer(
-            ctx.accounts.vault_program.to_account_info().key(),
-            cpi_accounts,
-            signers
-        );
-        brokex_vault::cpi::update_locked_capital(cpi_ctx, delta_locked as i64)?;
+
+        let locked_after = std::cmp::max(new_lp_locked_long, new_lp_locked_short);
+        delta_locked = locked_after.saturating_sub(locked_before);
+
+        // Trade Acceptance Rule 
+        let vault_balance = ctx.accounts.vault_token_account.amount;
+        let free_capital = vault_balance.saturating_sub(ctx.accounts.vault_state.total_locked_capital);
+        
+        require!(free_capital >= delta_locked, CoreError::InsufficientVaultLiquidity);
+
+        // Update Vault Locked Capital via CPI
+        if delta_locked > 0 {
+            let bump = ctx.bumps.settlement_authority;
+            let bump_seed = [bump];
+            let signer_seeds: &[&[u8]] = &[SETTLEMENT_SEED, &bump_seed];
+            let signers: &[&[&[u8]]] = &[signer_seeds];
+
+            let cpi_accounts = brokex_vault::cpi::accounts::UpdateLockedCapital {
+                caller: ctx.accounts.settlement_authority.to_account_info(),
+                vault_state: ctx.accounts.vault_state.to_account_info(),
+            };
+            let cpi_ctx = CpiContext::new_with_signer(
+                ctx.accounts.vault_program.to_account_info().key(),
+                cpi_accounts,
+                signers
+            );
+            brokex_vault::cpi::update_locked_capital(cpi_ctx, delta_locked as i64)?;
+        }
+
+        // Update Asset State
+        if direction == PositionDirection::Long {
+            asset.oi_long = asset.oi_long.checked_add(oi).ok_or(CoreError::Overflow)?;
+            asset.lp_locked_long = asset.lp_locked_long.checked_add(oi).ok_or(CoreError::Overflow)?;
+            let priced_oi = (oi as u128).checked_mul(actual_entry_price as u128).ok_or(CoreError::Overflow)?;
+            asset.sum_priced_oi_long = asset.sum_priced_oi_long.checked_add(priced_oi).ok_or(CoreError::Overflow)?;
+        } else {
+            asset.oi_short = asset.oi_short.checked_add(oi).ok_or(CoreError::Overflow)?;
+            asset.lp_locked_short = asset.lp_locked_short.checked_add(oi).ok_or(CoreError::Overflow)?;
+            let priced_oi = (oi as u128).checked_mul(actual_entry_price as u128).ok_or(CoreError::Overflow)?;
+            asset.sum_priced_oi_short = asset.sum_priced_oi_short.checked_add(priced_oi).ok_or(CoreError::Overflow)?;
+        }
     }
 
-    // Update Asset State
-    if direction == PositionDirection::Long {
-        asset.oi_long = asset.oi_long.checked_add(oi).ok_or(CoreError::Overflow)?;
-        asset.lp_locked_long = asset.lp_locked_long.checked_add(oi).ok_or(CoreError::Overflow)?;
-        let priced_oi = (oi as u128).checked_mul(entry_price as u128).ok_or(CoreError::Overflow)?;
-        asset.sum_priced_oi_long = asset.sum_priced_oi_long.checked_add(priced_oi).ok_or(CoreError::Overflow)?;
-    } else {
-        asset.oi_short = asset.oi_short.checked_add(oi).ok_or(CoreError::Overflow)?;
-        asset.lp_locked_short = asset.lp_locked_short.checked_add(oi).ok_or(CoreError::Overflow)?;
-        let priced_oi = (oi as u128).checked_mul(entry_price as u128).ok_or(CoreError::Overflow)?;
-        asset.sum_priced_oi_short = asset.sum_priced_oi_short.checked_add(priced_oi).ok_or(CoreError::Overflow)?;
-    }
 
 
     // Store Position
@@ -198,12 +219,17 @@ pub fn open_position_handler(
     position.trader = ctx.accounts.trader.key();
     position.asset_id = asset_id;
     position.direction = direction;
-    position.collateral = margin; // Net collateral (after commission)
+    position.collateral = margin; // Net collateral
     position.leverage = leverage;
     position.size = oi;
-    position.entry_price = entry_price;
-    position.lp_locked_capital = oi;
-    position.state = PositionState::Open;
+    position.entry_price = actual_entry_price;
+    position.lp_locked_capital = if is_market { oi } else { 0 };
+    position.state = if is_market { PositionState::Open } else { PositionState::Pending };
+    position.order_type = order_type;
+    position.target_price = target_price;
+    position.execution_status = if is_market { ExecutionStatus::Executed } else { ExecutionStatus::Pending };
+    position.sl_price = sl_price;
+    position.tp_price = tp_price;
     position.open_time = Clock::get()?.unix_timestamp;
     position.bump = ctx.bumps.position;
     ctx.accounts.config.next_position_id = position_id.checked_add(1).ok_or(CoreError::Overflow)?;

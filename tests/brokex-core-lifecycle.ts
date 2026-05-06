@@ -41,6 +41,8 @@ describe("brokex-core-lifecycle", () => {
     coreProgram.programId
   );
   const assetId = "SOL/USD";
+  const defaultSlPrice = new BN(55_000_000_000);
+  const defaultTpPrice = new BN(65_000_000_000);
   const [assetPda] = PublicKey.findProgramAddressSync(
     [ASSET_SEED, Buffer.from(assetId)],
     coreProgram.programId
@@ -234,9 +236,16 @@ describe("brokex-core-lifecycle", () => {
     const tradeId = await currentPositionId();
     const positionPda = derivePositionPda(trader.publicKey, assetId, tradeId);
     await coreProgram.methods
-      .openPosition(assetId, new BN(100_000_000), 10, {
-        long: {},
-      })
+      .openPosition(
+        assetId,
+        new BN(100_000_000),
+        10,
+        { long: {} },
+        { market: {} },
+        new BN(0),
+        defaultSlPrice,
+        defaultTpPrice
+      )
       .accountsPartial({
         trader: trader.publicKey,
         config: configPda,
@@ -263,7 +272,16 @@ describe("brokex-core-lifecycle", () => {
     const tradeId = await currentPositionId();
     const positionPda = derivePositionPda(trader.publicKey, assetId, tradeId);
     await coreProgram.methods
-      .openPosition(assetId, new BN(100_000_000), 10, { long: {} })
+      .openPosition(
+        assetId,
+        new BN(100_000_000),
+        10,
+        { long: {} },
+        { market: {} },
+        new BN(0),
+        defaultSlPrice,
+        defaultTpPrice
+      )
       .accountsPartial({
         trader: trader.publicKey,
         config: configPda,
@@ -312,7 +330,16 @@ describe("brokex-core-lifecycle", () => {
     const tradeId = await currentPositionId();
     const positionPda = derivePositionPda(trader.publicKey, assetId, tradeId);
     await coreProgram.methods
-      .openPosition(assetId, new BN(100_000_000), 2, { long: {} })
+      .openPosition(
+        assetId,
+        new BN(100_000_000),
+        2,
+        { long: {} },
+        { market: {} },
+        new BN(0),
+        defaultSlPrice,
+        defaultTpPrice
+      )
       .accountsPartial({
         trader: trader.publicKey,
         config: configPda,
@@ -374,9 +401,16 @@ describe("brokex-core-lifecycle", () => {
     const tradeId = await currentPositionId();
     const positionPda = derivePositionPda(trader.publicKey, assetId, tradeId);
     await coreProgram.methods
-      .openPosition(assetId, new BN(100_000_000), 10, {
-        long: {},
-      })
+      .openPosition(
+        assetId,
+        new BN(100_000_000),
+        10,
+        { long: {} },
+        { market: {} },
+        new BN(0),
+        defaultSlPrice,
+        defaultTpPrice
+      )
       .accountsPartial({
         trader: trader.publicKey,
         config: configPda,
@@ -446,7 +480,16 @@ describe("brokex-core-lifecycle", () => {
     const idA = await currentPositionId();
     const pdaA = derivePositionPda(trader.publicKey, assetId, idA);
     await coreProgram.methods
-      .openPosition(assetId, new BN(100_000_000), 2, { long: {} })
+      .openPosition(
+        assetId,
+        new BN(100_000_000),
+        2,
+        { long: {} },
+        { market: {} },
+        new BN(0),
+        defaultSlPrice,
+        defaultTpPrice
+      )
       .accountsPartial({
         trader: trader.publicKey,
         config: configPda,
@@ -468,7 +511,16 @@ describe("brokex-core-lifecycle", () => {
     const idB = await currentPositionId();
     const pdaB = derivePositionPda(trader.publicKey, assetId, idB);
     await coreProgram.methods
-      .openPosition(assetId, new BN(100_000_000), 5, { long: {} })
+      .openPosition(
+        assetId,
+        new BN(100_000_000),
+        5,
+        { long: {} },
+        { market: {} },
+        new BN(0),
+        defaultSlPrice,
+        defaultTpPrice
+      )
       .accountsPartial({
         trader: trader.publicKey,
         config: configPda,
@@ -491,5 +543,345 @@ describe("brokex-core-lifecycle", () => {
     const stateB = await coreProgram.account.position.fetch(pdaB);
     assert.ok(stateA.state.hasOwnProperty("open"));
     assert.ok(stateB.state.hasOwnProperty("open"));
+  });
+
+  it("handles conditional orders lifecycle (Limit -> Execute)", async () => {
+    const tradeId = await currentPositionId();
+    const positionPda = derivePositionPda(trader.publicKey, assetId, tradeId);
+
+    // Open a Limit Order
+    await coreProgram.methods
+      .openPosition(
+        assetId,
+        new BN(100_000_000),
+        2,
+        { long: {} },
+        { limit: {} },
+        new BN(50_000_000_000), // Target price $50,000
+        new BN(45_000_000_000), // SL price $45,000
+        new BN(65_000_000_000), // TP price $65,000
+      )
+      .accountsPartial({
+        trader: trader.publicKey,
+        config: configPda,
+        asset: assetPda,
+        pythPriceUpdate: oracle60.publicKey, // Current price is 60k, which > 50k (limit). It will stay pending.
+        position: positionPda,
+        traderTokenAccount: traderAta,
+        vaultTokenAccount: vaultTokenAta,
+        coreCollateralToken: coreCollateralAta,
+        vaultState: vaultStatePda,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([trader])
+      .rpc();
+
+    let pos = await coreProgram.account.position.fetch(positionPda);
+    assert.ok(
+      pos.state.hasOwnProperty("pending"),
+      "position should be pending",
+    );
+    assert.ok(
+      pos.orderType.hasOwnProperty("limit"),
+      "order type should be limit",
+    );
+    assert.ok(
+      pos.executionStatus.hasOwnProperty("pending"),
+      "execution should be pending",
+    );
+
+    // Update SL/TP while Pending
+    await coreProgram.methods
+      .updateSlTp(
+        assetId,
+        tradeId,
+        new BN(40_000_000_000),
+        new BN(70_000_000_000),
+      )
+      .accountsPartial({
+        trader: trader.publicKey,
+        position: positionPda,
+      })
+      .signers([trader])
+      .rpc();
+
+    pos = await coreProgram.account.position.fetch(positionPda);
+    assert.equal(pos.slPrice.toString(), new BN(40_000_000_000).toString());
+
+    // Execute Batch (Trigger Limit Order)
+    // Oracle price goes down to 50k, triggering the limit order
+    await coreProgram.methods
+      .executeBatch(assetId, { conditionalOrderExecute: {} })
+      .accountsPartial({
+        keeper: admin.publicKey,
+        config: configPda,
+        asset: assetPda,
+        pythPriceUpdate: oracle50.publicKey,
+        vaultTokenAccount: vaultTokenAta,
+        coreCollateralToken: coreCollateralAta,
+        vaultState: vaultStatePda,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .remainingAccounts([
+        { pubkey: positionPda, isSigner: false, isWritable: true },
+      ])
+      .signers([admin])
+      .rpc();
+
+    pos = await coreProgram.account.position.fetch(positionPda);
+    assert.ok(
+      pos.state.hasOwnProperty("open"),
+      "position should be open after execution",
+    );
+    assert.ok(
+      pos.executionStatus.hasOwnProperty("executed"),
+      "execution should be executed",
+    );
+  });
+
+  it("rejects openPosition when SL or TP is zero", async () => {
+    const tradeIdWithZeroSl = await currentPositionId();
+    const positionWithZeroSl = derivePositionPda(
+      trader.publicKey,
+      assetId,
+      tradeIdWithZeroSl
+    );
+
+    try {
+      await coreProgram.methods
+        .openPosition(
+          assetId,
+          new BN(100_000_000),
+          2,
+          { long: {} },
+          { market: {} },
+          new BN(0),
+          new BN(0),
+          defaultTpPrice
+        )
+        .accountsPartial({
+          trader: trader.publicKey,
+          config: configPda,
+          asset: assetPda,
+          pythPriceUpdate: oracle60.publicKey,
+          position: positionWithZeroSl,
+          traderTokenAccount: traderAta,
+          vaultTokenAccount: vaultTokenAta,
+          coreCollateralToken: coreCollateralAta,
+          vaultState: vaultStatePda,
+          settlementAuthority: settlementAuthorityPda,
+          vaultProgram: vaultProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([trader])
+        .rpc();
+      assert.fail("expected openPosition with zero SL to fail");
+    } catch (e) {
+      const msg = String(e);
+      assert.include(
+        msg,
+        "SL/TP values must be greater than zero",
+        "openPosition should reject zero SL"
+      );
+    }
+
+    const tradeIdWithZeroTp = await currentPositionId();
+    const positionWithZeroTp = derivePositionPda(
+      trader.publicKey,
+      assetId,
+      tradeIdWithZeroTp
+    );
+
+    try {
+      await coreProgram.methods
+        .openPosition(
+          assetId,
+          new BN(100_000_000),
+          2,
+          { long: {} },
+          { market: {} },
+          new BN(0),
+          defaultSlPrice,
+          new BN(0)
+        )
+        .accountsPartial({
+          trader: trader.publicKey,
+          config: configPda,
+          asset: assetPda,
+          pythPriceUpdate: oracle60.publicKey,
+          position: positionWithZeroTp,
+          traderTokenAccount: traderAta,
+          vaultTokenAccount: vaultTokenAta,
+          coreCollateralToken: coreCollateralAta,
+          vaultState: vaultStatePda,
+          settlementAuthority: settlementAuthorityPda,
+          vaultProgram: vaultProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([trader])
+        .rpc();
+      assert.fail("expected openPosition with zero TP to fail");
+    } catch (e) {
+      const msg = String(e);
+      assert.include(
+        msg,
+        "SL/TP values must be greater than zero",
+        "openPosition should reject zero TP"
+      );
+    }
+  });
+
+  it("rejects updateSlTp when SL or TP is zero", async () => {
+    const tradeId = await currentPositionId();
+    const positionPda = derivePositionPda(trader.publicKey, assetId, tradeId);
+    await coreProgram.methods
+      .openPosition(
+        assetId,
+        new BN(100_000_000),
+        2,
+        { long: {} },
+        { market: {} },
+        new BN(0),
+        defaultSlPrice,
+        defaultTpPrice
+      )
+      .accountsPartial({
+        trader: trader.publicKey,
+        config: configPda,
+        asset: assetPda,
+        pythPriceUpdate: oracle60.publicKey,
+        position: positionPda,
+        traderTokenAccount: traderAta,
+        vaultTokenAccount: vaultTokenAta,
+        coreCollateralToken: coreCollateralAta,
+        vaultState: vaultStatePda,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([trader])
+      .rpc();
+
+    try {
+      await coreProgram.methods
+        .updateSlTp(assetId, tradeId, new BN(0), defaultTpPrice)
+        .accountsPartial({
+          trader: trader.publicKey,
+          position: positionPda,
+        })
+        .signers([trader])
+        .rpc();
+      assert.fail("expected updateSlTp with zero SL to fail");
+    } catch (e) {
+      const msg = String(e);
+      assert.include(
+        msg,
+        "SL/TP values must be greater than zero",
+        "updateSlTp should reject zero SL"
+      );
+    }
+
+    try {
+      await coreProgram.methods
+        .updateSlTp(assetId, tradeId, defaultSlPrice, new BN(0))
+        .accountsPartial({
+          trader: trader.publicKey,
+          position: positionPda,
+        })
+        .signers([trader])
+        .rpc();
+      assert.fail("expected updateSlTp with zero TP to fail");
+    } catch (e) {
+      const msg = String(e);
+      assert.include(
+        msg,
+        "SL/TP values must be greater than zero",
+        "updateSlTp should reject zero TP"
+      );
+    }
+  });
+
+  it("handles cancelling a pending order", async () => {
+    const tradeId = await currentPositionId();
+    const positionPda = derivePositionPda(trader.publicKey, assetId, tradeId);
+
+    // Open a Stop Order
+    await coreProgram.methods
+      .openPosition(
+        assetId,
+        new BN(100_000_000),
+        2,
+        { long: {} },
+        { stop: {} },
+        new BN(70_000_000_000), // Target price $70,000
+        new BN(45_000_000_000), // SL price $45,000
+        new BN(85_000_000_000), // TP price $85,000
+      )
+      .accountsPartial({
+        trader: trader.publicKey,
+        config: configPda,
+        asset: assetPda,
+        pythPriceUpdate: oracle60.publicKey,
+        position: positionPda,
+        traderTokenAccount: traderAta,
+        vaultTokenAccount: vaultTokenAta,
+        coreCollateralToken: coreCollateralAta,
+        vaultState: vaultStatePda,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([trader])
+      .rpc();
+
+    let pos = await coreProgram.account.position.fetch(positionPda);
+    assert.ok(
+      pos.state.hasOwnProperty("pending"),
+      "position should be pending",
+    );
+
+    const traderBefore = (
+      await provider.connection.getTokenAccountBalance(traderAta)
+    ).value.uiAmount!;
+
+    // Cancel the Order
+    await coreProgram.methods
+      .cancelOrder(assetId, tradeId)
+      .accountsPartial({
+        trader: trader.publicKey,
+        position: positionPda,
+        traderTokenAccount: traderAta,
+        coreCollateralToken: coreCollateralAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .signers([trader])
+      .rpc();
+
+    const traderAfter = (
+      await provider.connection.getTokenAccountBalance(traderAta)
+    ).value.uiAmount!;
+    assert.ok(
+      traderAfter > traderBefore,
+      "Trader should receive collateral back",
+    );
+
+    pos = await coreProgram.account.position.fetch(positionPda);
+    assert.ok(
+      pos.state.hasOwnProperty("canceled"),
+      "position should be canceled",
+    );
+    assert.ok(
+      pos.executionStatus.hasOwnProperty("canceled"),
+      "execution should be canceled",
+    );
   });
 });

@@ -40,4 +40,6 @@ pub enum CoreError {
     InsufficientVaultLiquidity,
     #[msg("State invariant violated")]
     InvariantViolation,
+    #[msg("SL/TP values must be greater than zero")]
+    InvalidSlTpValue,
 }

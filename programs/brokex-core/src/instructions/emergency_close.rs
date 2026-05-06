@@ -84,43 +84,30 @@ pub fn emergency_close_handler(ctx: Context<EmergencyClose>, asset_id: String, _
     let asset = &mut ctx.accounts.asset;
 
     // Capital Unlocking Logic 
-    let locked_before = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);
-    
-    // Unwind Asset state
-    if pos_direction == PositionDirection::Long {
-        asset.oi_long = asset
-            .oi_long
-            .checked_sub(pos_size)
-            .ok_or(CoreError::InvariantViolation)?;
-        asset.lp_locked_long = asset
-            .lp_locked_long
-            .checked_sub(pos_size)
-            .ok_or(CoreError::InvariantViolation)?;
-        asset.sum_priced_oi_long = asset
-            .sum_priced_oi_long
-            .checked_sub(priced_oi)
-            .ok_or(CoreError::InvariantViolation)?;
-    } else {
-        asset.oi_short = asset
-            .oi_short
-            .checked_sub(pos_size)
-            .ok_or(CoreError::InvariantViolation)?;
-        asset.lp_locked_short = asset
-            .lp_locked_short
-            .checked_sub(pos_size)
-            .ok_or(CoreError::InvariantViolation)?;
-        asset.sum_priced_oi_short = asset
-            .sum_priced_oi_short
-            .checked_sub(priced_oi)
-            .ok_or(CoreError::InvariantViolation)?;
-    }
+    let mut delta_unlocked = 0;
 
-    let locked_after = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);
-    let delta_unlocked = locked_before.saturating_sub(locked_after);
+    if ctx.accounts.position.state == PositionState::Open {
+        let locked_before = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);
+        
+        // Unwind Asset state
+        if pos_direction == PositionDirection::Long {
+            asset.oi_long = asset.oi_long.saturating_sub(pos_size);
+            asset.lp_locked_long = asset.lp_locked_long.saturating_sub(pos_size);
+            asset.sum_priced_oi_long = asset.sum_priced_oi_long.saturating_sub(priced_oi);
+        } else {
+            asset.oi_short = asset.oi_short.saturating_sub(pos_size);
+            asset.lp_locked_short = asset.lp_locked_short.saturating_sub(pos_size);
+            asset.sum_priced_oi_short = asset.sum_priced_oi_short.saturating_sub(priced_oi);
+        }
+
+        let locked_after = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);
+        delta_unlocked = locked_before.saturating_sub(locked_after);
+    }
 
     // Update Position
     let pm = &mut ctx.accounts.position;
     pm.state = PositionState::EmergencyClosed;
+    pm.execution_status = ExecutionStatus::Canceled;
     pm.close_time = Clock::get()?.unix_timestamp;
 
     let bump = ctx.bumps.settlement_authority;

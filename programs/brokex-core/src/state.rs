@@ -44,6 +44,22 @@ pub enum PositionState {
     Open,
     Closed,
     EmergencyClosed,
+    Pending,
+    Canceled,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
+pub enum OrderType {
+    Market,
+    Limit,
+    Stop,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
+pub enum ExecutionStatus {
+    Pending,
+    Executed,
+    Canceled,
 }
 
 #[account]
@@ -60,6 +76,11 @@ pub struct Position {
     pub entry_price: u64,
     pub lp_locked_capital: u64,
     pub state: PositionState,
+    pub order_type: OrderType,
+    pub target_price: u64,
+    pub execution_status: ExecutionStatus,
+    pub sl_price: u64,
+    pub tp_price: u64,
     pub open_time: i64,
     pub close_time: i64,
     pub close_price: u64,

@@ -60,8 +60,22 @@ pub mod brokex_core {
         collateral: u64,
         leverage: u8,
         direction: PositionDirection,
+        order_type: OrderType,
+        target_price: u64,
+        sl_price: u64,
+        tp_price: u64,
     ) -> Result<()> {
-        instructions::open_position_handler(ctx, asset_id, collateral, leverage, direction)
+        instructions::open_position_handler(
+            ctx,
+            asset_id,
+            collateral,
+            leverage,
+            direction,
+            order_type,
+            target_price,
+            sl_price,
+            tp_price,
+        )
     }
 
     pub fn close_position(
@@ -78,5 +92,31 @@ pub mod brokex_core {
         trade_id: u64,
     ) -> Result<()> {
         instructions::emergency_close_handler(ctx, asset_id, trade_id)
+    }
+
+    pub fn cancel_order(
+        ctx: Context<CancelOrder>,
+        asset_id: String,
+        trade_id: u64,
+    ) -> Result<()> {
+        instructions::cancel_order_handler(ctx, asset_id, trade_id)
+    }
+
+    pub fn update_sl_tp(
+        ctx: Context<UpdateSlTp>,
+        asset_id: String,
+        trade_id: u64,
+        sl_price: u64,
+        tp_price: u64,
+    ) -> Result<()> {
+        instructions::update_sl_tp_handler(ctx, asset_id, trade_id, sl_price, tp_price)
+    }
+
+    pub fn execute_batch<'info>(
+        ctx: Context<'info, ExecuteBatch<'info>>,
+        asset_id: String,
+        action_type: ActionType,
+    ) -> Result<()> {
+        instructions::execute_batch_handler(ctx, asset_id, action_type)
     }
 }

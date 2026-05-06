@@ -73,6 +73,7 @@ struct Fixture {
     vault_token: Pubkey,
     admin_ata: Pubkey,
     trader_ata: Pubkey,
+    core_collateral_ata: Pubkey,
 }
 
 impl Fixture {
@@ -109,6 +110,14 @@ impl Fixture {
             .create_associated_token_account(&mint, &trader)
             .expect("trader ata");
 
+        let core_collateral_ata = ctx
+            .svm
+            .create_associated_token_account(&mint, &core)
+            .expect("core collateral ata");
+        ctx.svm
+            .mint_to(&mint, &core_collateral_ata, &admin, 50_000_000)
+            .expect("mint core collateral");
+
         Self {
             ctx,
             admin,
@@ -120,6 +129,7 @@ impl Fixture {
             vault_token,
             admin_ata,
             trader_ata,
+            core_collateral_ata,
         }
     }
 
@@ -184,6 +194,7 @@ impl Fixture {
                 caller: caller.pubkey(),
                 vault_state: self.vault_state,
                 vault_token: self.vault_token,
+                core_collateral_token: self.core_collateral_ata,
                 trader_token: self.trader_ata,
                 token_program: spl_token::id(),
             }
@@ -471,29 +482,30 @@ fn settle_profit_exceeds_vault_rejected() {
 }
 
 #[test]
-fn settle_loss_is_retained_in_vault() {
+fn settle_loss_is_collected_from_core_collateral() {
     let mut f = Fixture::new_uninitialized();
     f.initialize();
     let ix = f.deposit_ix(f.admin_ata, 10_000_000);
     exec_ok(&mut f.ctx, ix, &[&f.admin]);
-    
-    // Loss is 5M. Vault already has 10M.
-    // After settle(loss=5M), Vault still has 10M (it just didn't pay out anything).
+
+    // Loss is transferred from core collateral to vault.
     let ix = f.settle_ix(0, 5_000_000, &f.core);
     exec_ok(&mut f.ctx, ix, &[&f.core]);
-    f.ctx.svm.assert_token_balance(&f.vault_token, 10_000_000);
+    f.ctx.svm.assert_token_balance(&f.vault_token, 15_000_000);
+    f.ctx
+        .svm
+        .assert_token_balance(&f.core_collateral_ata, 45_000_000);
 }
 
 #[test]
-fn settle_profit_and_loss_same_ix_allowed() {
+fn settle_profit_and_loss_same_ix_rejected() {
     let mut f = Fixture::new_uninitialized();
     f.initialize();
     let ix = f.deposit_ix(f.admin_ata, 10_000_000);
     exec_ok(&mut f.ctx, ix, &[&f.admin]);
     let ix = f.settle_ix(1_000_000, 1_000_000, &f.core);
-    exec_ok(&mut f.ctx, ix, &[&f.core]);
-    // Vault paid out 1M profit, so it should have 9M left.
-    f.ctx.svm.assert_token_balance(&f.vault_token, 9_000_000);
+    let r = exec(&mut f.ctx, ix, &[&f.core]);
+    assert_anchor_err(&r, "InvalidVaultValue");
 }
 
 // ─── Paused ─────────────────────────────────────────────────────────────────

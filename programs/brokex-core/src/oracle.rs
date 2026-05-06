@@ -33,6 +33,7 @@ pub fn get_validated_price(
     max_age_secs:  u64,
     max_conf_bps:  u64,
 ) -> Result<u64> {
+    #[cfg(not(feature = "mock-oracle"))]
     let expected_owner = PYTH_RECEIVER_PROGRAM_ID
         .parse::<Pubkey>()
         .map_err(|_| error!(CoreError::InvalidPrice))?;

@@ -4,6 +4,7 @@ use crate::state::*;
 use crate::constants::*;
 use crate::oracle;
 use crate::error::CoreError;
+use crate::logic::{calculate_liquidation_price, validate_sl_tp};
 
 #[derive(Accounts)]
 #[instruction(asset_id: String)]
@@ -97,8 +98,6 @@ pub fn open_position_handler(
 
     // Basic Validations
     require!(leverage > 0, CoreError::Overflow);
-    require!(sl_price > 0, CoreError::InvalidSlTpValue);
-    require!(tp_price > 0, CoreError::InvalidSlTpValue);
     
     // Validate price using the oracle logic
     let oracle_price = oracle::get_validated_price(
@@ -159,6 +158,7 @@ pub fn open_position_handler(
 
     if is_market {
         actual_entry_price = entry_price;
+        validate_sl_tp(actual_entry_price, direction, sl_price, tp_price)?;
 
         // Capital Locking Logic 
         let locked_before = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);
@@ -230,6 +230,12 @@ pub fn open_position_handler(
     position.execution_status = if is_market { ExecutionStatus::Executed } else { ExecutionStatus::Pending };
     position.sl_price = sl_price;
     position.tp_price = tp_price;
+    position.liquidation_price = if is_market {
+        calculate_liquidation_price(actual_entry_price, leverage, direction)?
+    } else {
+        validate_sl_tp(target_price, direction, sl_price, tp_price)?;
+        0
+    };
     position.open_time = Clock::get()?.unix_timestamp;
     position.bump = ctx.bumps.position;
     ctx.accounts.config.next_position_id = position_id.checked_add(1).ok_or(CoreError::Overflow)?;

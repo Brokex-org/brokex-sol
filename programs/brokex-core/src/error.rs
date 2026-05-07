@@ -40,6 +40,12 @@ pub enum CoreError {
     InsufficientVaultLiquidity,
     #[msg("State invariant violated")]
     InvariantViolation,
-    #[msg("SL/TP values must be greater than zero")]
-    InvalidSlTpValue,
+    #[msg("Stop loss must be on the correct side of the reference price")]
+    InvalidStopLossPrice,
+    #[msg("Take profit must be on the correct side of the reference price")]
+    InvalidTakeProfitPrice,
+    #[msg("Invalid reference price for validation")]
+    InvalidReferencePrice,
+    #[msg("Invalid batch input")]
+    InvalidBatchInput,
 }

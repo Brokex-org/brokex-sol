@@ -43,6 +43,7 @@ pub enum PositionDirection {
 pub enum PositionState {
     Open,
     Closed,
+    Liquidated,
     EmergencyClosed,
     Pending,
     Canceled,
@@ -81,6 +82,7 @@ pub struct Position {
     pub execution_status: ExecutionStatus,
     pub sl_price: u64,
     pub tp_price: u64,
+    pub liquidation_price: u64,
     pub open_time: i64,
     pub close_time: i64,
     pub close_price: u64,

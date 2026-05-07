@@ -11,8 +11,8 @@ brokex-core = "7yRpue4276YpzxgF3bTTUfTTUbtVArjDYbbYxYBWV8Ys"
 brokex-vault = "AePFV3TeyAkWMSR3YjE7ufkkwo1Mcsm4vUDSgvouqxUK"
 
 [programs.localnet]
-brokex-vault = "AePFV3TeyAkWMSR3YjE7ufkkwo1Mcsm4vUDSgvouqxUK"
 brokex-core = "7yRpue4276YpzxgF3bTTUfTTUbtVArjDYbbYxYBWV8Ys"
+brokex-vault = "AePFV3TeyAkWMSR3YjE7ufkkwo1Mcsm4vUDSgvouqxUK"
 
 [provider]
 cluster = "localnet"

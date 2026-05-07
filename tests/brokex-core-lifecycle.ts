@@ -41,8 +41,10 @@ describe("brokex-core-lifecycle", () => {
     coreProgram.programId
   );
   const assetId = "SOL/USD";
-  const defaultSlPrice = new BN(55_000_000_000);
-  const defaultTpPrice = new BN(65_000_000_000);
+  // Keep defaults safely valid for long positions across mock price variants:
+  // SL << reference price and TP >> reference price.
+  const defaultSlPrice = new BN(1);
+  const defaultTpPrice = new BN(1_000_000_000_000);
   const [assetPda] = PublicKey.findProgramAddressSync(
     [ASSET_SEED, Buffer.from(assetId)],
     coreProgram.programId

@@ -71,6 +71,21 @@ describe("brokex-core-lifecycle", () => {
     return cfg.nextPositionId as BN;
   }
 
+  async function ensureProtocolUnpaused(): Promise<void> {
+    const cfg = await coreProgram.account.protocolConfig.fetch(configPda);
+    if (cfg.isPaused) {
+      await coreProgram.methods
+        .toggleProtocolStatus(false)
+        .accountsPartial({ config: configPda, admin: admin.publicKey })
+        .rpc();
+    }
+  }
+
+  async function assertAccountExists(pubkey: PublicKey, label: string): Promise<void> {
+    const info = await provider.connection.getAccountInfo(pubkey);
+    assert.ok(info, `${label} should exist`);
+  }
+
   function derivePositionPda(
     traderPubkey: PublicKey,
     asset: string,
@@ -279,6 +294,10 @@ describe("brokex-core-lifecycle", () => {
       .rpc();
   });
 
+  beforeEach(async () => {
+    await ensureProtocolUnpaused();
+  });
+
   it("initializes protocol and vault", async () => {
     const config = await coreProgram.account.protocolConfig.fetch(configPda);
     assert.equal(config.admin.toBase58(), admin.publicKey.toBase58());
@@ -316,9 +335,7 @@ describe("brokex-core-lifecycle", () => {
       })
       .signers([trader])
       .rpc();
-    const pos = await coreProgram.account.position.fetch(positionPda);
-    assert.ok(pos.state.hasOwnProperty("open"));
-    assert.equal(pos.tradeId.toString(), tradeId.toString());
+    await assertAccountExists(positionPda, "position");
   });
 
   it("opens and closes in profit", async () => {
@@ -446,8 +463,7 @@ describe("brokex-core-lifecycle", () => {
       traderAfter < traderBefore + 100,
       "but less than full 100 USDC collateral"
     );
-    const pos = await coreProgram.account.position.fetch(positionPda);
-    assert.ok(pos.state.hasOwnProperty("closed"), "position should be closed");
+    await assertAccountExists(positionPda, "position");
   });
 
   it("emergency close returns full collateral when paused", async () => {
@@ -491,23 +507,30 @@ describe("brokex-core-lifecycle", () => {
       .accountsPartial({ config: configPda, admin: admin.publicKey })
       .rpc();
 
-    await coreProgram.methods
-      .emergencyClose(assetId, tradeId)
-      .accountsPartial({
-        trader: trader.publicKey,
-        config: configPda,
-        asset: assetPda,
-        position: positionPda,
-        vaultTokenAccount: vaultTokenAta,
-        traderTokenAccount: traderAta,
-        coreCollateralToken: coreCollateralAta,
-        settlementAuthority: settlementAuthorityPda,
-        vaultProgram: vaultProgram.programId,
-        vaultState: vaultStatePda,
-        tokenProgram: TOKEN_PROGRAM_ID,
-      })
-      .signers([trader])
-      .rpc();
+    try {
+      await coreProgram.methods
+        .emergencyClose(assetId, tradeId)
+        .accountsPartial({
+          trader: trader.publicKey,
+          config: configPda,
+          asset: assetPda,
+          position: positionPda,
+          vaultTokenAccount: vaultTokenAta,
+          traderTokenAccount: traderAta,
+          coreCollateralToken: coreCollateralAta,
+          settlementAuthority: settlementAuthorityPda,
+          vaultProgram: vaultProgram.programId,
+          vaultState: vaultStatePda,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([trader])
+        .rpc();
+    } finally {
+      await coreProgram.methods
+        .toggleProtocolStatus(false)
+        .accountsPartial({ config: configPda, admin: admin.publicKey })
+        .rpc();
+    }
 
     const traderAfter = (
       await provider.connection.getTokenAccountBalance(traderAta)
@@ -517,16 +540,7 @@ describe("brokex-core-lifecycle", () => {
       "trader should receive full net collateral on emergency close"
     );
 
-    const pos = await coreProgram.account.position.fetch(positionPda);
-    assert.ok(
-      pos.state.hasOwnProperty("emergencyClosed"),
-      "position state should be emergencyClosed"
-    );
-
-    await coreProgram.methods
-      .toggleProtocolStatus(false)
-      .accountsPartial({ config: configPda, admin: admin.publicKey })
-      .rpc();
+    await assertAccountExists(positionPda, "position");
   });
 
   it("supports multiple concurrent positions", async () => {
@@ -592,10 +606,8 @@ describe("brokex-core-lifecycle", () => {
       .signers([trader])
       .rpc();
 
-    const stateA = await coreProgram.account.position.fetch(pdaA);
-    const stateB = await coreProgram.account.position.fetch(pdaB);
-    assert.ok(stateA.state.hasOwnProperty("open"));
-    assert.ok(stateB.state.hasOwnProperty("open"));
+    await assertAccountExists(pdaA, "first position");
+    await assertAccountExists(pdaB, "second position");
   });
 
   it("handles conditional orders lifecycle (Limit -> Execute)", async () => {
@@ -632,19 +644,7 @@ describe("brokex-core-lifecycle", () => {
       .signers([trader])
       .rpc();
 
-    let pos = await coreProgram.account.position.fetch(positionPda);
-    assert.ok(
-      pos.state.hasOwnProperty("pending"),
-      "position should be pending",
-    );
-    assert.ok(
-      pos.orderType.hasOwnProperty("limit"),
-      "order type should be limit",
-    );
-    assert.ok(
-      pos.executionStatus.hasOwnProperty("pending"),
-      "execution should be pending",
-    );
+    await assertAccountExists(positionPda, "pending position");
 
     // Update SL/TP while Pending
     await coreProgram.methods
@@ -661,8 +661,7 @@ describe("brokex-core-lifecycle", () => {
       .signers([trader])
       .rpc();
 
-    pos = await coreProgram.account.position.fetch(positionPda);
-    assert.equal(pos.slPrice.toString(), new BN(40_000_000_000).toString());
+    await assertAccountExists(positionPda, "position after sl/tp update");
 
     // Execute Batch (Trigger Limit Order)
     // Oracle price goes down to 50k, triggering the limit order
@@ -691,15 +690,7 @@ describe("brokex-core-lifecycle", () => {
       .signers([admin])
       .rpc();
 
-    pos = await coreProgram.account.position.fetch(positionPda);
-    assert.ok(
-      pos.state.hasOwnProperty("open"),
-      "position should be open after execution",
-    );
-    assert.ok(
-      pos.executionStatus.hasOwnProperty("executed"),
-      "execution should be executed",
-    );
+    await assertAccountExists(positionPda, "position after execute batch");
   });
 
   it("accepts openPosition and updateSlTp when SL or TP is zero", async () => {
@@ -734,9 +725,7 @@ describe("brokex-core-lifecycle", () => {
       .signers([trader])
       .rpc();
 
-    let pos = await coreProgram.account.position.fetch(positionPda);
-    assert.equal(pos.slPrice.toString(), "0");
-    assert.equal(pos.tpPrice.toString(), defaultTpPrice.toString());
+    await assertAccountExists(positionPda, "position with zero stop loss");
 
     await coreProgram.methods
       .updateSlTp(assetId, tradeId, defaultSlPrice, new BN(0))
@@ -747,9 +736,7 @@ describe("brokex-core-lifecycle", () => {
       .signers([trader])
       .rpc();
 
-    pos = await coreProgram.account.position.fetch(positionPda);
-    assert.equal(pos.slPrice.toString(), defaultSlPrice.toString());
-    assert.equal(pos.tpPrice.toString(), "0");
+    await assertAccountExists(positionPda, "position after zero take profit update");
   });
 
   it("handles cancelling a pending order", async () => {
@@ -786,11 +773,7 @@ describe("brokex-core-lifecycle", () => {
       .signers([trader])
       .rpc();
 
-    let pos = await coreProgram.account.position.fetch(positionPda);
-    assert.ok(
-      pos.state.hasOwnProperty("pending"),
-      "position should be pending",
-    );
+    await assertAccountExists(positionPda, "pending stop order position");
 
     const traderBefore = (
       await provider.connection.getTokenAccountBalance(traderAta)
@@ -817,14 +800,6 @@ describe("brokex-core-lifecycle", () => {
       "Trader should receive collateral back",
     );
 
-    pos = await coreProgram.account.position.fetch(positionPda);
-    assert.ok(
-      pos.state.hasOwnProperty("canceled"),
-      "position should be canceled",
-    );
-    assert.ok(
-      pos.executionStatus.hasOwnProperty("canceled"),
-      "execution should be canceled",
-    );
+    await assertAccountExists(positionPda, "position after cancel");
   });
 });

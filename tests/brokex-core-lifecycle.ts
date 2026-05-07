@@ -88,6 +88,25 @@ describe("brokex-core-lifecycle", () => {
     assert.ok(info, `${label} should exist`);
   }
 
+  async function withRetry<T>(
+    action: () => Promise<T>,
+    retries = 5,
+    delayMs = 400
+  ): Promise<T> {
+    let lastErr: unknown;
+    for (let i = 0; i < retries; i++) {
+      try {
+        return await action();
+      } catch (err) {
+        lastErr = err;
+        if (i < retries - 1) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+      }
+    }
+    throw lastErr;
+  }
+
   function derivePositionPda(
     traderPubkey: PublicKey,
     asset: string,
@@ -242,11 +261,13 @@ describe("brokex-core-lifecycle", () => {
     }
 
     traderAta = (
-      await getOrCreateAssociatedTokenAccount(
-        provider.connection,
-        admin,
-        usdcMint,
-        trader.publicKey
+      await withRetry(() =>
+        getOrCreateAssociatedTokenAccount(
+          provider.connection,
+          admin,
+          usdcMint,
+          trader.publicKey
+        )
       )
     ).address;
     await mintTo(
@@ -259,21 +280,25 @@ describe("brokex-core-lifecycle", () => {
     );
 
     coreCollateralAta = (
-      await getOrCreateAssociatedTokenAccount(
-        provider.connection,
-        admin,
-        usdcMint,
-        settlementAuthorityPda,
-        true
+      await withRetry(() =>
+        getOrCreateAssociatedTokenAccount(
+          provider.connection,
+          admin,
+          usdcMint,
+          settlementAuthorityPda,
+          true
+        )
       )
     ).address;
 
     const adminAta = (
-      await getOrCreateAssociatedTokenAccount(
-        provider.connection,
-        admin,
-        usdcMint,
-        admin.publicKey
+      await withRetry(() =>
+        getOrCreateAssociatedTokenAccount(
+          provider.connection,
+          admin,
+          usdcMint,
+          admin.publicKey
+        )
       )
     ).address;
     await mintTo(

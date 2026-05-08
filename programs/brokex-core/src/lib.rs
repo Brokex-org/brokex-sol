@@ -35,6 +35,13 @@ pub mod brokex_core {
         instructions::add_asset_handler(ctx, asset_id, pyth_feed, config_input)
     }
 
+    pub fn update_asset_pyth_feed(
+        ctx: Context<UpdateAssetPythFeed>,
+        new_pyth_feed: Pubkey,
+    ) -> Result<()> {
+        instructions::update_asset_pyth_feed_handler(ctx, new_pyth_feed)
+    }
+
     pub fn toggle_asset_status(ctx: Context<ToggleAssetStatus>, is_enabled: bool) -> Result<()> {
         instructions::toggle_asset_handler(ctx, is_enabled)
     }

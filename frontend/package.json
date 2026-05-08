@@ -1,0 +1,59 @@
+{
+  "name": "brokexorderly",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5174",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@dynamic-labs/ethereum": "^4.72.0",
+    "@dynamic-labs/sdk-api-core": "^0.0.922",
+    "@dynamic-labs/sdk-react-core": "^4.72.0",
+    "@ethersproject/bignumber": "^5.8.0",
+    "@lit/reactive-element": "^2.1.2",
+    "@orderly.network/hooks": "^2.11.2",
+    "@privy-io/react-auth": "^3.19.0",
+    "@pythnetwork/pyth-solana-receiver": "^0.13.0",
+    "@rainbow-me/rainbowkit": "^2.2.10",
+    "@solana/spl-token": "^0.4.14",
+    "@solana/wallet-adapter-react": "^0.15.39",
+    "@solana/web3.js": "^1.98.4",
+    "@spicenet-io/spiceflow-ui": "^2.4.3",
+    "@tanstack/react-query": "^5.96.2",
+    "@web3-onboard/common": "^2.4.2",
+    "@web3icons/react": "^4.1.17",
+    "axios": "^1.14.0",
+    "bs58": "^6.0.0",
+    "lightweight-charts": "^5.1.0",
+    "lit": "^3.3.2",
+    "lit-element": "^4.2.2",
+    "lit-html": "^3.3.2",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-router-dom": "^7.13.2",
+    "viem": "^2.47.6",
+    "wagmi": "^2.19.5"
+  },
+  "overrides": {
+    "@solana/web3.js": "^1.98.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^24.12.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.4.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.57.0",
+    "vite": "^8.0.1",
+    "vite-plugin-node-polyfills": "^0.25.0"
+  }
+}

@@ -6,13 +6,14 @@ const MSG_OFFSET_BASE: usize = 40;
 
 fn make_account_data(msg: &PriceFeedMessage, full_vl: bool) -> Vec<u8> {
     let mut buf = vec![0u8; 8 + 32];
-    if full_vl { 
+    if full_vl {
         buf.push(1); // 1 byte verification header
-    } else { 
+    } else {
         buf.extend_from_slice(&[0, 2]); // 2 byte verification header
     }
     use anchor_lang::AnchorSerialize;
     msg.serialize(&mut buf).unwrap();
+    buf.extend_from_slice(&999u64.to_le_bytes()); // posted_slot like real PriceUpdateV2
     buf
 }
 
@@ -49,13 +50,16 @@ fn normalize_exponent_positive() {
     assert_eq!(normalize_price(650, 2).unwrap(), 65_000 * PRICE_PRECISION);
 }
 
+const PRICE_FEED_MESSAGE_BYTES: usize = 32 + 8 + 8 + 4 + 8 + 8 + 8 + 8;
+
 #[test]
 fn parses_full_verification_level() {
     let m = msg(6_500_000_000_000, 1_000_000, -8, 1_000_000);
     let data = make_account_data(&m, true);
-    
+
     // Offset = Base(40) + 1 (full verification byte) = 41
-    let parsed = PriceFeedMessage::try_from_slice(&data[MSG_OFFSET_BASE + 1..]).unwrap();
+    let o = MSG_OFFSET_BASE + 1;
+    let parsed = PriceFeedMessage::try_from_slice(&data[o..o + PRICE_FEED_MESSAGE_BYTES]).unwrap();
     assert_eq!(parsed.price, m.price);
     assert_eq!(parsed.conf, m.conf);
 }
@@ -64,9 +68,10 @@ fn parses_full_verification_level() {
 fn parses_partial_verification_level() {
     let m = msg(6_500_000_000_000, 1_000_000, -8, 1_000_000);
     let data = make_account_data(&m, false);
-    
+
     // Offset = Base(40) + 2 (partial verification bytes) = 42
-    let parsed = PriceFeedMessage::try_from_slice(&data[MSG_OFFSET_BASE + 2..]).unwrap();
+    let o = MSG_OFFSET_BASE + 2;
+    let parsed = PriceFeedMessage::try_from_slice(&data[o..o + PRICE_FEED_MESSAGE_BYTES]).unwrap();
     assert_eq!(parsed.price, m.price);
 }
 

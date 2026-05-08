@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-08T23:21:46.764Z",
+  "generatedAt": "2026-05-08T23:35:52.997Z",
   "cluster": "devnet",
   "rpc": "https://api.devnet.solana.com",
   "wallet": {
@@ -53,27 +53,21 @@
     }
   ],
   "balances": {
-    "requestedDepositUsdc": 40,
-    "requestedDepositRaw": "40000000",
+    "requestedDepositUsdc": 20,
+    "requestedDepositRaw": "20000000",
     "adminUsdcRaw": "0",
     "adminUsdc": "0",
-    "vaultUsdcRaw": "40000000",
-    "vaultUsdc": "40",
+    "vaultUsdcRaw": "60000000",
+    "vaultUsdc": "60",
     "vaultLockedRaw": "0",
     "vaultLockedUsdc": "0",
-    "vaultFreeRaw": "40000000",
-    "vaultFreeUsdc": "40"
+    "vaultFreeRaw": "60000000",
+    "vaultFreeUsdc": "60"
   },
   "signatures": {
-    "vaultInitialize": "3yd7ewSG5FjbkryVBpTctgD7HcYECiKXTCPyo31yfBh9dsS4PXXnHcecN8eMMZacs1cacknipwq3ygK9usyxgtSi",
-    "protocolInitialize": "2H9sbtfFAco156T57dwNxvhJMnYZPjqvkRHCNikWhScjGUyePgk9G8gZn9fqx7am1dqVwhSPfqnLZg2zMLSkP4En",
-    "assets": {
-      "BTC/USD": "KvKQWEnr61xT6pWF5NAeAoGYkJvMzV8P3g1mjBuR3xc1BUH627MzMiLfLxDxb75nbpiKKptL4RdLx4Sd75yxFm8",
-      "ETH/USD": "2yJfLi2NAiuQoaJMaYy2pQ83z9wkFAgzZrgpGUFRxGvEGsAGQT7WKVqv4MaK1aNQzSC4KwtVYftC56tByvE8HWfD",
-      "SOL/USD": "5mq4QyXhV3yDNWx9mgaFp1HKEYX9YZbD2p8xzrWEHL7vtmNEovZGNq7iut4V2x2pT3tVK8cPMkNb9G6b4j3uvbVf",
-      "EUR/USD": "3SuBLfRtuaJtXUxne3C4GApfLvBDWdJo4hbKCGzp84szA4fYYhyh57d6bQDhXFEGSRUPriiS88XGo3Uap4iTY8yC",
-      "XAU/USD": "2kbTdB3Qcd6y1P5tcxfhaF5FizBEXKv7EDUpyLMXy2U3Chi4Y5ZueZP7ozQ1sSGRqeJCJW6xHqbnHgyacwzcXCqY"
-    },
-    "deposit": "4MYf3NiAxMgXtrBfhgxcPCC8MthwF8jQQBtNYwNMwR8EsZSVtw56JYxAP7yCDj8mFDGgtJPUXQ3ZoVW2Y4wDKYzt"
+    "vaultInitialize": null,
+    "protocolInitialize": null,
+    "assets": {},
+    "deposit": "4zhAWQTxCtZSYa7yRBa2w2eV6CmEnfNaQtZvg2VFXejLrTdABSCZFW9YUrrXHeb4iDXtR9254cTcsEvCx3aKhNEf"
   }
 }

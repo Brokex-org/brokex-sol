@@ -17,6 +17,11 @@ pub struct PriceFeedMessage {
     pub ema_conf:          u64,
 }
 
+/// Borsh-packed size of `PriceFeedMessage` (`pyth_solana_receiver_sdk::PriceUpdateV2::price_message`).
+/// On-chain account data continues with `posted_slot: u64` after this; `try_from_slice` on the tail fails if those bytes are included.
+const PRICE_FEED_MESSAGE_BYTES: usize =
+    32 + 8 + 8 + 4 + 8 + 8 + 8 + 8;
+
 /// Returns the size of the verification level header based on the first byte.
 fn verification_level_size(data: &[u8]) -> Result<usize> {
     match data.first() {
@@ -52,15 +57,18 @@ pub fn get_validated_price(
     }
 
     let data   = price_account.try_borrow_data()?;
-    let mut offset = 8 + 32; // Skip discriminator (8b) and accumulator header (32b)
+    let mut offset = 8 + 32; // Skip discriminator (8b) + write_authority (32b)
 
-    require!(data.len() > offset + 2, CoreError::InvalidPrice);
-
-    //  Skip variable verification level header
+    require!(data.len() > offset, CoreError::InvalidPrice);
     offset += verification_level_size(&data[offset..])?;
 
-    //  Deserialize message
-    let msg = PriceFeedMessage::try_from_slice(&data[offset..])
+    let msg_end = offset
+        .checked_add(PRICE_FEED_MESSAGE_BYTES)
+        .ok_or(error!(CoreError::InvalidPrice))?;
+    require!(data.len() >= msg_end, CoreError::InvalidPrice);
+
+    // Deserialize only `price_message`; real accounts have `posted_slot` (8 B) after this.
+    let msg = PriceFeedMessage::try_from_slice(&data[offset..msg_end])
         .map_err(|_| error!(CoreError::InvalidPrice))?;
 
     //  Feed ID check

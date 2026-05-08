@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import { useTheme } from '../ThemeContext';
+import { useNetwork } from './NetworkContext';
+import { solanaTxExplorerUrl } from '../utils/solana/programConfig';
 
 export interface ToastProps {
   id: string;
@@ -22,6 +24,7 @@ const ToastContext = createContext<ToastContextType | undefined>(undefined);
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastProps[]>([]);
   const { themeBg, themeBorder, themeText, themeTextMuted, buyColor, sellColor } = useTheme();
+  const { cluster } = useNetwork();
 
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -85,6 +88,22 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             )}
             
             {toast.message && <div style={{ margin: 0, fontSize: '0.8rem', color: themeTextMuted }}>{toast.message}</div>}
+            {toast.txHash && (
+              <a
+                href={solanaTxExplorerUrl(toast.txHash, cluster)}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  fontSize: '0.75rem',
+                  color: '#BC8961',
+                  textDecoration: 'none',
+                  fontWeight: 500,
+                  width: 'fit-content',
+                }}
+              >
+                View on Explorer ↗
+              </a>
+            )}
           </div>
         ))}
       </div>

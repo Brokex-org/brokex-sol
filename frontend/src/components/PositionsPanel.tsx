@@ -16,8 +16,7 @@ import {
   buildCreateCoreCollateralAtaIxIfNeeded,
   buildUpdateSlTpIx,
 } from '../utils/solana/trading';
-import { getPythFeedId0x, getRpcEndpoint, solanaTxExplorerUrl } from '../utils/solana/programConfig';
-import { useNetwork } from '../contexts/NetworkContext';
+import { getPythFeedId0x, getRpcEndpoint } from '../utils/solana/programConfig';
 import { ix, sendHermesPythThenConsumeLegacy } from '../utils/solana/pythTradeTx';
 import { validateAssetPythFeedAlignment } from '../utils/solana/assetPythAlignment';
 import { fetchSolanaCorePositionsForTrader } from '../utils/solana/solanaPositions';
@@ -33,8 +32,6 @@ export const PositionsPanel = () => {
   const { getTradeLiveMath } = useOstiumCalculations();
   const { addToast } = useToast();
   const { prices, selectedAsset } = usePriceContext();
-  const { cluster: solanaCluster } = useNetwork();
-
   const [address, setAddress] = useState<string | undefined>(undefined);
   const [activeTab, setActiveTab] = useState('Open Positions');
   const [filterAsset, setFilterAsset] = useState('All');
@@ -236,33 +233,40 @@ export const PositionsPanel = () => {
         pair: getSymbol(itemData),
         side: itemData.isBuy ? 'buy' : 'sell',
         txHash,
-        message: (
-          <a
-            href={solanaTxExplorerUrl(txHash, solanaCluster)}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              display: 'inline-block',
-              marginTop: '6px',
-              padding: '6px 12px',
-              backgroundColor: '#3b82f6',
-              color: '#fff',
-              borderRadius: '4px',
-              textDecoration: 'none',
-              fontSize: '0.75rem',
-              fontWeight: 500,
-            }}
-          >
-            View on Explorer ↗
-          </a>
-        ),
       });
       setActiveTradeModal(null);
       setActiveLimitModal(null);
 
     } catch (err: any) {
       console.error(err);
-      addToast({ type: 'error', title: 'Action Failed', message: err.message?.substring(0, 80) + '...' });
+      let msg =
+        err && typeof err === 'object' && 'message' in err && typeof err.message === 'string'
+          ? err.message
+          : 'Unknown transaction error';
+
+      if (
+        err &&
+        typeof err === 'object' &&
+        'getLogs' in err &&
+        typeof (err as { getLogs: unknown }).getLogs === 'function'
+      ) {
+        try {
+          const connection = new Connection(getRpcEndpoint(), 'confirmed');
+          const logs = await (err as { getLogs: (c: Connection) => Promise<string[]> }).getLogs(connection);
+          console.error('Simulation / send logs:', logs);
+          if (logs?.length) {
+            msg = `${msg}\n${logs.slice(-8).join('\n')}`;
+          }
+        } catch (logErr) {
+          console.warn('Could not fetch transaction logs', logErr);
+        }
+      }
+
+      addToast({
+        type: 'error',
+        title: 'Action Failed',
+        message: msg.length > 400 ? `${msg.slice(0, 400)}…` : msg,
+      });
     }
   };
 
@@ -579,8 +583,6 @@ export const PositionsPanel = () => {
       {(() => {
         const orderFormContainer = document.getElementById('order-form-container');
         const symbol = activeLimitModal ? getSymbol(activeLimitModal) : '';
-        const limitPriceData = prices[symbol];
-        const isMarketOpen = limitPriceData ? (limitPriceData.isMarketOpen && !limitPriceData.isDayTradingClosed) : true;
 
         const limitModalEl = (
           <EditLimitModal 
@@ -591,6 +593,7 @@ export const PositionsPanel = () => {
             symbol={symbol}
             onAction={(type: string, params: any) => executeAction(type, params, activeLimitModal)}
             theme={theme}
+            isMarketOpen={prices[symbol] ? (prices[symbol].isMarketOpen && !prices[symbol].isDayTradingClosed) : true}
           />
         );
         return activeLimitModal && orderFormContainer ? createPortal(limitModalEl, orderFormContainer) : limitModalEl;

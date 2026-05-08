@@ -7,16 +7,16 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-brokex-core = "7yRpue4276YpzxgF3bTTUfTTUbtVArjDYbbYxYBWV8Ys"
-brokex-vault = "AePFV3TeyAkWMSR3YjE7ufkkwo1Mcsm4vUDSgvouqxUK"
+brokex-core = "2D2SpgCJqZquV5DD1jrXWL6cmuqoxFgsNjihkt9BUdNB"
+brokex-vault = "6bo6uqoj77cHBMYg9FCbKYGc3iUzNW62RLK7Xmzqawk8"
 
 [programs.localnet]
-brokex-core = "7yRpue4276YpzxgF3bTTUfTTUbtVArjDYbbYxYBWV8Ys"
-brokex-vault = "AePFV3TeyAkWMSR3YjE7ufkkwo1Mcsm4vUDSgvouqxUK"
+brokex-core = "2D2SpgCJqZquV5DD1jrXWL6cmuqoxFgsNjihkt9BUdNB"
+brokex-vault = "6bo6uqoj77cHBMYg9FCbKYGc3iUzNW62RLK7Xmzqawk8"
 
 [provider]
 cluster = "localnet"
-wallet = "keys/localnet-authority.json"
+wallet = "keys/devnet-admin.json"
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/brokex-core-lifecycle.ts"

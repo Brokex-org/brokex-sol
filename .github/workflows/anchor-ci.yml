@@ -48,9 +48,7 @@ jobs:
 
       # Committed program keypairs must match declare_id! (do not commit `target/`).
       - name: Stage program deploy keypairs
-        run: |
-          mkdir -p target/deploy
-          cp deploy/brokex_core-keypair.json deploy/brokex_vault-keypair.json target/deploy/
+        run: yarn prep:program-keys
 
       - name: Set Solana cluster to devnet
         run: solana config set --url devnet
@@ -62,11 +60,8 @@ jobs:
       - name: Run Rust tests
         run: cargo test --workspace --features litesvm-integration -- --nocapture
 
-      # Rebuild with mock-oracle feature for TypeScript lifecycle tests.
-      # mock-oracle allows system-owned accounts to act as price feeds in localnet tests.
-      # The feature is ONLY active here; the production binary above is unaffected.
-      - name: Build Anchor programs (mock-oracle for TS tests)
-        run: anchor build -- --features mock-oracle
-
-      - name: Run TypeScript lifecycle tests
-        run: anchor test --skip-build --validator legacy
+      # The TypeScript lifecycle suite uses system-owned mock oracle accounts.
+      # Keep key staging, mock build, and test execution in one script so CI cannot
+      # accidentally run these tests against the production oracle binary.
+      - name: Run TypeScript lifecycle tests (mock-oracle)
+        run: yarn test:lifecycle

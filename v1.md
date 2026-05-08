@@ -1,0 +1,714 @@
+# Brokex — Next Core/Vault Upgrade Specification
+
+## Objective
+
+Extend the current MVP into a more advanced perpetual trading engine with:
+
+* dynamic spread,
+* dynamic funding rates,
+* capital efficiency using alpha optimization,
+* partial close,
+* add/remove margin,
+* public LP deposits/withdrawals,
+* LP token pricing based on unrealized PnL.
+
+This specification defines the exact mathematical logic and expected on-chain behavior.
+
+---
+
+# 1. Dynamic Funding Rate System
+
+## Goal
+
+Funding rates must dynamically depend on the imbalance between long and short open interest.
+
+The dominant side pays higher funding.
+The minority side pays reduced funding.
+
+This mechanism incentivizes rebalancing of exposure.
+
+---
+
+# 2. Funding State Per Asset
+
+Each asset must maintain:
+
+```solidity
+struct AssetState {
+    uint256 openInterestLong;
+    uint256 openInterestShort;
+
+    uint256 riskLong;
+    uint256 riskShort;
+
+    uint256 sumPricedOILong;
+    uint256 sumPricedOIShort;
+
+    uint256 fundingIndexLong;
+    uint256 fundingIndexShort;
+
+    uint256 lastFundingUpdate;
+}
+```
+
+---
+
+# 3. Funding Index Logic
+
+Funding is accumulated continuously through cumulative indexes.
+
+Each trade stores:
+
+```solidity
+openFundingIndex
+```
+
+When closing:
+
+```text
+fundingFee =
+    openInterest *
+    (currentFundingIndex - openFundingIndex)
+    / PRECISION
+```
+
+This avoids iterating over all trades.
+
+---
+
+# 4. Funding Rate Formula
+
+## Smoothstep Skew
+
+First compute imbalance ratio:
+
+```text
+diff  = abs(longOI - shortOI)
+total = longOI + shortOI
+
+r = diff / total
+```
+
+Then apply smoothstep:
+
+```text
+smoothstep(r) = r² * (3 - 2r)
+```
+
+Scaled with PRECISION:
+
+```text
+p = smoothstepSkew
+```
+
+This produces a progressive curve:
+
+* near balanced -> almost no increase,
+* highly imbalanced -> aggressive increase.
+
+---
+
+# 5. Funding Rate Computation
+
+Inputs:
+
+* baseFunding
+* maxFunding
+* p = smoothstep skew
+
+Dominant side:
+
+```text
+dominantFunding =
+baseFunding *
+(0.5 + 9.5 * p)
+```
+
+Minority side:
+
+```text
+minorityFunding =
+baseFunding *
+(0.5 - reduction)
+```
+
+Where:
+
+```text
+reduction = 0.2 * p
+```
+
+Clamp:
+
+* dominantFunding <= maxFunding
+* minorityFunding <= dominantFunding
+
+Behavior:
+
+* balanced market -> both sides ~ baseFunding / 2
+* highly imbalanced -> dominant side pays much more.
+
+---
+
+# 6. Funding Index Update Timing
+
+Funding indexes MUST update:
+
+* before opening a trade,
+* before executing an order,
+* before closing a trade,
+* before liquidation,
+* before stop loss / take profit execution.
+
+Formula:
+
+```text
+dt = currentTimestamp - lastFundingUpdate
+
+fundingIndexLong += fundingRateLong * dt / YEAR
+fundingIndexShort += fundingRateShort * dt / YEAR
+```
+
+Then:
+
+```text
+lastFundingUpdate = block.timestamp
+```
+
+---
+
+# 7. Dynamic Spread
+
+## Goal
+
+Spread dynamically increases on the dominant side.
+
+Dominant side:
+
+* worse execution.
+
+Minority side:
+
+* improved execution.
+
+---
+
+# 8. Spread Formula
+
+Use same smoothstep skew:
+
+```text
+p = smoothstepSkew(longOI, shortOI)
+```
+
+Base spread:
+
+```text
+baseSpread
+```
+
+Dominant side:
+
+```text
+spread =
+baseSpread * (1 + 3p)
+```
+
+Minority side:
+
+```text
+spread =
+baseSpread * (1 - reduction)
+```
+
+Where:
+
+```text
+reduction = 0.2 * p
+```
+
+---
+
+# 9. Spread Application
+
+## Opening
+
+Long:
+
+```text
+entry = oraclePrice + spread
+```
+
+Short:
+
+```text
+entry = oraclePrice - spread
+```
+
+## Closing
+
+Long:
+
+```text
+close = oraclePrice - spread
+```
+
+Short:
+
+```text
+close = oraclePrice + spread
+```
+
+Spread MUST use current OI BEFORE updating exposure.
+
+---
+
+# 10. Alpha-Based Capital Optimization
+
+## Goal
+
+Avoid locking unnecessary LP capital when long/short exposure offsets.
+
+We do NOT lock:
+
+```text
+riskLong + riskShort
+```
+
+Instead:
+
+* compute dominant side,
+* compute matched exposure,
+* reduce required capital through alpha efficiency.
+
+---
+
+# 11. Risk Variables
+
+Per asset:
+
+```text
+riskLong
+riskShort
+```
+
+Each trade contributes:
+
+```text
+lpLockedCapital
+```
+
+Usually:
+
+```text
+lpLockedCapital =
+openInterest * profitCap
+```
+
+---
+
+# 12. NeedLock Formula
+
+Inputs:
+
+```text
+matched  = min(riskLong, riskShort)
+dominant = max(riskLong, riskShort)
+```
+
+If dominant == 0:
+
+```text
+needLock = 0
+```
+
+Balance factor:
+
+```text
+balance = matched / dominant
+```
+
+Depth factor:
+
+```text
+depth =
+matched /
+(matched + alphaScale)
+```
+
+Reduction:
+
+```text
+reduction =
+(1 - alphaMin)
+* balance
+* depth
+```
+
+Alpha:
+
+```text
+alpha =
+max(alphaMin, 1 - reduction)
+```
+
+Final capital requirement:
+
+```text
+needLock =
+dominant * alpha
+```
+
+---
+
+# 13. Capital Locking Logic
+
+When opening:
+
+* compute oldNeedLock,
+* compute newNeedLock,
+* lock only:
+
+```text
+newNeedLock - oldNeedLock
+```
+
+When closing:
+
+* compute oldNeedLock,
+* compute newNeedLock,
+* unlock only:
+
+```text
+oldNeedLock - newNeedLock
+```
+
+Closing a trade MUST NEVER increase locked capital.
+
+---
+
+# 14. Weighted Average Open Prices
+
+Per asset:
+
+```text
+sumPricedOILong
+sumPricedOIShort
+```
+
+Update on open:
+
+```text
+sumPricedOILong += oi * entryPrice
+```
+
+Average:
+
+```text
+avgOpenLong =
+sumPricedOILong / openInterestLong
+```
+
+Same for shorts.
+
+On close:
+subtract the trade contribution.
+
+These averages will later be used for:
+
+* unrealized PnL,
+* LP token pricing,
+* risk analysis.
+
+---
+
+# 15. Liquidation Threshold Per Asset
+
+Each asset must define:
+
+```text
+liquidationThreshold
+```
+
+Constraints:
+
+* minimum = 90%
+* maximum = 100%
+
+Examples:
+
+* 90% => liquidation before full margin loss,
+* 100% => liquidation only at total margin depletion.
+
+---
+
+# 16. Liquidation Price Formula
+
+Long:
+
+```text
+move =
+openPrice * liquidationThreshold / leverage
+
+liqPrice =
+openPrice - move
+```
+
+Short:
+
+```text
+liqPrice =
+openPrice + move
+```
+
+---
+
+# 17. Add Margin
+
+Function:
+
+```text
+addMargin(tradeId, amount)
+```
+
+Behavior:
+
+* transfer USDC,
+* increase trade margin,
+* recalculate liquidation price.
+
+Must NOT modify:
+
+* open interest,
+* LP locked capital,
+* funding index,
+* weighted averages,
+* exposure.
+
+---
+
+# 18. Remove Margin / Partial Close
+
+Function:
+
+```text
+removeMargin(tradeId, amount)
+```
+
+This acts as:
+
+* partial close,
+* proportional realization of PnL.
+
+---
+
+# 19. Partial Close Logic
+
+If:
+
+```text
+ratio = amount / currentMargin
+```
+
+Then proportionally reduce:
+
+* margin,
+* openInterest,
+* lpLockedCapital,
+* trader exposure,
+* riskLong/riskShort,
+* weighted OI contribution.
+
+Realized PnL:
+
+```text
+realizedPnl =
+totalPnl * ratio
+```
+
+If positive:
+
+* trader receives profit.
+
+If negative:
+
+* trader realizes loss.
+
+Then:
+
+* remaining trade continues with reduced size.
+
+---
+
+# 20. Public LP Deposits
+
+Vault becomes public.
+
+Anyone can deposit USDC.
+
+Vault mints LP shares.
+
+---
+
+# 21. LP Token Price
+
+Formula:
+
+```text
+lpPrice =
+(vaultBalance + unrealizedPnL)
+/
+totalLpSupply
+```
+
+Where:
+
+* unrealizedPnL can be positive or negative.
+
+Positive unrealized trader PnL:
+
+* vault owes traders,
+* LP token value decreases.
+
+Negative unrealized trader PnL:
+
+* vault is profitable,
+* LP token value increases.
+
+---
+
+# 22. Unrealized PnL Calculation
+
+Must use:
+
+* ONE Pyth proof containing ALL active assets.
+
+Verification:
+
+* proof contains every active listed asset,
+* proof count == activeAssetCount,
+* prices are fresh,
+* prices are not future timestamps.
+
+For each asset:
+
+Long unrealized PnL:
+
+```text
+longPnl =
+longOI *
+(currentPrice - avgOpenLong)
+/
+avgOpenLong
+```
+
+Short unrealized PnL:
+
+```text
+shortPnl =
+shortOI *
+(avgOpenShort - currentPrice)
+/
+avgOpenShort
+```
+
+Cap:
+
+```text
+pnl <= riskLong/riskShort
+```
+
+Global:
+
+```text
+unrealizedPnl =
+sum(all asset pnl)
+```
+
+---
+
+# 23. LP Deposit Flow
+
+User:
+
+* sends USDC.
+
+Protocol:
+
+* computes current LP price,
+* mints proportional LP shares.
+
+Formula:
+
+```text
+sharesMinted =
+depositAmount / lpPrice
+```
+
+USDC enters Vault.
+
+---
+
+# 24. LP Withdraw Flow
+
+User specifies:
+
+```text
+lpSharesToBurn
+```
+
+Protocol:
+
+* computes LP token price,
+* converts shares into USDC value.
+
+Formula:
+
+```text
+withdrawAmount =
+lpShares * lpPrice
+```
+
+Then:
+
+* verify enough free capital exists,
+* burn LP shares,
+* transfer USDC.
+
+Withdrawals MUST NEVER use locked capital.
+
+---
+
+# 25. Free Capital
+
+Vault must maintain:
+
+```text
+totalLockedCapital
+```
+
+And:
+
+```text
+freeCapital =
+vaultBalance - totalLockedCapital
+```
+
+Only free capital:
+
+* can be withdrawn,
+* can pay trader profits,
+* can support new trades.
+
+---
+
+# 26. Oracle Requirements
+
+All unrealized PnL and LP pricing must:
+
+* use a single merged proof,
+* validate all active assets,
+* validate timestamps,
+* reject incomplete proofs.
+
+This is mandatory for secure LP pricing.

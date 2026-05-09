@@ -250,6 +250,8 @@ describe("brokex-core-lifecycle", () => {
       const addAssetBuilder = coreProgram.methods
         .addAsset(assetId, oracle60.publicKey, {
           commissionOpenBps: new anchor.BN(0),
+          baseFundingPerYear: new anchor.BN(10_000),
+          maxFundingPerYear: new anchor.BN(1_000_000),
         })
         .accountsPartial({
           asset: assetPda,

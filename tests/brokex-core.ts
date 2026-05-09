@@ -47,6 +47,8 @@ describe("brokex-core", () => {
 
   const configInput = {
     commissionOpenBps: new anchor.BN(10),
+    baseFundingPerYear: new anchor.BN(10_000),
+    maxFundingPerYear: new anchor.BN(1_000_000),
   };
 
   it("initializes the protocol config", async () => {

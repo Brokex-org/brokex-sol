@@ -230,7 +230,11 @@ async function main() {
     if (!existing) {
       console.log(`Adding asset ${assetId} (feed ${desiredFeed.toBase58()})...`);
       deploymentSigs.assets[assetId] = await coreProgram.methods
-        .addAsset(assetId, desiredFeed, { commissionOpenBps: new anchor.BN(0) })
+        .addAsset(assetId, desiredFeed, {
+          commissionOpenBps: new anchor.BN(0),
+          baseFundingPerYear: new anchor.BN(10_000),
+          maxFundingPerYear: new anchor.BN(1_000_000),
+        })
         .accounts({
           asset: assetPda,
           config: configPda,

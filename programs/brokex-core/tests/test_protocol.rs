@@ -69,6 +69,8 @@ fn test_protocol_flow() {
             pyth_feed,
             config_input: brokex_core::instructions::AssetConfigInput {
                 commission_open_bps: 0,
+                base_funding_per_year: 10_000,
+                max_funding_per_year: 1_000_000,
             }
         }
         .data(),

@@ -5,6 +5,7 @@ use brokex_vault::VaultState;
 
 use crate::constants::*;
 use crate::error::CoreError;
+use crate::logic::{sync_risk_from_oi, touch_asset_funding};
 use crate::state::*;
 
 #[derive(Accounts)]
@@ -87,6 +88,9 @@ pub fn emergency_close_handler(ctx: Context<EmergencyClose>, asset_id: String, _
     let mut delta_unlocked = 0;
 
     if ctx.accounts.position.state == PositionState::Open {
+        let now = Clock::get()?.unix_timestamp;
+        touch_asset_funding(asset, now)?;
+
         let locked_before = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);
         
         // Unwind Asset state
@@ -99,6 +103,7 @@ pub fn emergency_close_handler(ctx: Context<EmergencyClose>, asset_id: String, _
             asset.lp_locked_short = asset.lp_locked_short.saturating_sub(pos_size);
             asset.sum_priced_oi_short = asset.sum_priced_oi_short.saturating_sub(priced_oi);
         }
+        sync_risk_from_oi(asset);
 
         let locked_after = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);
         delta_unlocked = locked_before.saturating_sub(locked_after);

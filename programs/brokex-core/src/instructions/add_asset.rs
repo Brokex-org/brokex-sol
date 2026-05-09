@@ -6,6 +6,8 @@ use crate::error::CoreError;
 #[derive(AnchorSerialize, AnchorDeserialize)]
 pub struct AssetConfigInput {
     pub commission_open_bps: u64,
+    pub base_funding_per_year: u64,
+    pub max_funding_per_year: u64,
 }
 
 #[derive(Accounts)]
@@ -48,14 +50,21 @@ pub fn add_asset_handler(
 
     // Initialize config
     asset.commission_open_bps = config_input.commission_open_bps;
+    asset.base_funding_per_year = config_input.base_funding_per_year;
+    asset.max_funding_per_year = config_input.max_funding_per_year;
 
     // Initialize state
     asset.oi_long = 0;
     asset.oi_short = 0;
+    asset.risk_long = 0;
+    asset.risk_short = 0;
     asset.sum_priced_oi_long = 0;
     asset.sum_priced_oi_short = 0;
     asset.lp_locked_long = 0;
     asset.lp_locked_short = 0;
+    asset.funding_index_long = 0;
+    asset.funding_index_short = 0;
+    asset.last_funding_update = 0;
     
     msg!("Asset added: {} with feed: {}", asset_id, pyth_feed);
     Ok(())

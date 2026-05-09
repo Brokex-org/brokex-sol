@@ -12,3 +12,5 @@ target/
 dist/
 .log
 utility.file.txt
+docs
+scripts/create-next-upgrade-issues.sh

@@ -1,283 +1,714 @@
-## **Core Requirements — Extended MVP Clarification (Brokex Solana)**
+# Brokex — Next Core/Vault Upgrade Specification
 
-The current implementation must be adjusted to support a correct and scalable trading architecture. The priority is not advanced risk modeling, but ensuring that opening, closing, accounting, and settlement are strictly correct and consistent.
+## Objective
 
----
+Extend the current MVP into a more advanced perpetual trading engine with:
 
-## **1. Multiple Positions and Trade Identification**
+* dynamic spread,
+* dynamic funding rates,
+* capital efficiency using alpha optimization,
+* partial close,
+* add/remove margin,
+* public LP deposits/withdrawals,
+* LP token pricing based on unrealized PnL.
 
-The current design does not allow multiple positions per trader per asset because positions are indexed using a PDA derived from `(trader, asset_id)`.
-
-This must be changed.
-
-The system must support:
-
-* multiple simultaneous positions per user,
-* multiple positions across multiple assets,
-* independent lifecycle per position.
-
-Each position must therefore have a unique identifier:
-
-* introduce a global or per-user `position_id` counter,
-* each new position increments the counter,
-* positions are stored using `(position_id)` as a primary key.
-
-This is mandatory for scalability and correct accounting.
+This specification defines the exact mathematical logic and expected on-chain behavior.
 
 ---
 
-## **2. Per-Asset Accounting (Long / Short Separation)**
+# 1. Dynamic Funding Rate System
 
-For each asset, the Core must track independently:
+## Goal
 
-* `oi_long` (total long position size),
-* `oi_short` (total short position size),
-* `sum_priced_oi_long` (sum of size × entry price for longs),
-* `sum_priced_oi_short` (same for shorts),
-* `lp_locked_long`,
-* `lp_locked_short`.
+Funding rates must dynamically depend on the imbalance between long and short open interest.
 
-The weighted average entry prices must be computable at all times:
+The dominant side pays higher funding.
+The minority side pays reduced funding.
 
-* `avg_long_entry = sum_priced_oi_long / oi_long`
-* `avg_short_entry = sum_priced_oi_short / oi_short`
-
-These values are not immediately used for trading logic, but they are critical for future Vault accounting (LP token pricing and unrealized PnL tracking).
+This mechanism incentivizes rebalancing of exposure.
 
 ---
 
-## **3. LP Locked Capital Logic (Per Asset)**
+# 2. Funding State Per Asset
 
-The system must strictly follow this rule:
+Each asset must maintain:
 
-The effective locked capital for an asset is NOT:
+```solidity
+struct AssetState {
+    uint256 openInterestLong;
+    uint256 openInterestShort;
 
-`lp_locked_long + lp_locked_short`
+    uint256 riskLong;
+    uint256 riskShort;
 
-It is:
+    uint256 sumPricedOILong;
+    uint256 sumPricedOIShort;
 
-`max(lp_locked_long, lp_locked_short)`
+    uint256 fundingIndexLong;
+    uint256 fundingIndexShort;
 
-This reflects the net exposure of the system.
+    uint256 lastFundingUpdate;
+}
+```
 
 ---
 
-## **4. Locked Capital Updates on Open / Close**
+# 3. Funding Index Logic
 
-### On Position Open
+Funding is accumulated continuously through cumulative indexes.
 
-When a position is opened:
+Each trade stores:
 
-* update the corresponding side (long or short),
-* update OI, priced OI, and LP locked capital,
-* compute:
+```solidity
+openFundingIndex
+```
 
-`asset_locked_before = max(lp_locked_long, lp_locked_short)`
+When closing:
 
-Then simulate the new values:
+```text
+fundingFee =
+    openInterest *
+    (currentFundingIndex - openFundingIndex)
+    / PRECISION
+```
 
-`asset_locked_after = max(new_lp_locked_long, new_lp_locked_short)`
+This avoids iterating over all trades.
+
+---
+
+# 4. Funding Rate Formula
+
+## Smoothstep Skew
+
+First compute imbalance ratio:
+
+```text
+diff  = abs(longOI - shortOI)
+total = longOI + shortOI
+
+r = diff / total
+```
+
+Then apply smoothstep:
+
+```text
+smoothstep(r) = r² * (3 - 2r)
+```
+
+Scaled with PRECISION:
+
+```text
+p = smoothstepSkew
+```
+
+This produces a progressive curve:
+
+* near balanced -> almost no increase,
+* highly imbalanced -> aggressive increase.
+
+---
+
+# 5. Funding Rate Computation
+
+Inputs:
+
+* baseFunding
+* maxFunding
+* p = smoothstep skew
+
+Dominant side:
+
+```text
+dominantFunding =
+baseFunding *
+(0.5 + 9.5 * p)
+```
+
+Minority side:
+
+```text
+minorityFunding =
+baseFunding *
+(0.5 - reduction)
+```
+
+Where:
+
+```text
+reduction = 0.2 * p
+```
+
+Clamp:
+
+* dominantFunding <= maxFunding
+* minorityFunding <= dominantFunding
+
+Behavior:
+
+* balanced market -> both sides ~ baseFunding / 2
+* highly imbalanced -> dominant side pays much more.
+
+---
+
+# 6. Funding Index Update Timing
+
+Funding indexes MUST update:
+
+* before opening a trade,
+* before executing an order,
+* before closing a trade,
+* before liquidation,
+* before stop loss / take profit execution.
+
+Formula:
+
+```text
+dt = currentTimestamp - lastFundingUpdate
+
+fundingIndexLong += fundingRateLong * dt / YEAR
+fundingIndexShort += fundingRateShort * dt / YEAR
+```
 
 Then:
 
-`delta_locked = asset_locked_after - asset_locked_before`
-
-This delta represents the **actual additional capital requirement**.
+```text
+lastFundingUpdate = block.timestamp
+```
 
 ---
 
-### On Position Close
+# 7. Dynamic Spread
 
-When a position is closed:
+## Goal
 
-* subtract the exact position values from:
+Spread dynamically increases on the dominant side.
 
-  * OI,
-  * priced OI,
-  * LP locked capital (long or short side),
-* recompute:
+Dominant side:
 
-`asset_locked_before = previous max(...)`
-`asset_locked_after = new max(...)`
+* worse execution.
+
+Minority side:
+
+* improved execution.
+
+---
+
+# 8. Spread Formula
+
+Use same smoothstep skew:
+
+```text
+p = smoothstepSkew(longOI, shortOI)
+```
+
+Base spread:
+
+```text
+baseSpread
+```
+
+Dominant side:
+
+```text
+spread =
+baseSpread * (1 + 3p)
+```
+
+Minority side:
+
+```text
+spread =
+baseSpread * (1 - reduction)
+```
+
+Where:
+
+```text
+reduction = 0.2 * p
+```
+
+---
+
+# 9. Spread Application
+
+## Opening
+
+Long:
+
+```text
+entry = oraclePrice + spread
+```
+
+Short:
+
+```text
+entry = oraclePrice - spread
+```
+
+## Closing
+
+Long:
+
+```text
+close = oraclePrice - spread
+```
+
+Short:
+
+```text
+close = oraclePrice + spread
+```
+
+Spread MUST use current OI BEFORE updating exposure.
+
+---
+
+# 10. Alpha-Based Capital Optimization
+
+## Goal
+
+Avoid locking unnecessary LP capital when long/short exposure offsets.
+
+We do NOT lock:
+
+```text
+riskLong + riskShort
+```
+
+Instead:
+
+* compute dominant side,
+* compute matched exposure,
+* reduce required capital through alpha efficiency.
+
+---
+
+# 11. Risk Variables
+
+Per asset:
+
+```text
+riskLong
+riskShort
+```
+
+Each trade contributes:
+
+```text
+lpLockedCapital
+```
+
+Usually:
+
+```text
+lpLockedCapital =
+openInterest * profitCap
+```
+
+---
+
+# 12. NeedLock Formula
+
+Inputs:
+
+```text
+matched  = min(riskLong, riskShort)
+dominant = max(riskLong, riskShort)
+```
+
+If dominant == 0:
+
+```text
+needLock = 0
+```
+
+Balance factor:
+
+```text
+balance = matched / dominant
+```
+
+Depth factor:
+
+```text
+depth =
+matched /
+(matched + alphaScale)
+```
+
+Reduction:
+
+```text
+reduction =
+(1 - alphaMin)
+* balance
+* depth
+```
+
+Alpha:
+
+```text
+alpha =
+max(alphaMin, 1 - reduction)
+```
+
+Final capital requirement:
+
+```text
+needLock =
+dominant * alpha
+```
+
+---
+
+# 13. Capital Locking Logic
+
+When opening:
+
+* compute oldNeedLock,
+* compute newNeedLock,
+* lock only:
+
+```text
+newNeedLock - oldNeedLock
+```
+
+When closing:
+
+* compute oldNeedLock,
+* compute newNeedLock,
+* unlock only:
+
+```text
+oldNeedLock - newNeedLock
+```
+
+Closing a trade MUST NEVER increase locked capital.
+
+---
+
+# 14. Weighted Average Open Prices
+
+Per asset:
+
+```text
+sumPricedOILong
+sumPricedOIShort
+```
+
+Update on open:
+
+```text
+sumPricedOILong += oi * entryPrice
+```
+
+Average:
+
+```text
+avgOpenLong =
+sumPricedOILong / openInterestLong
+```
+
+Same for shorts.
+
+On close:
+subtract the trade contribution.
+
+These averages will later be used for:
+
+* unrealized PnL,
+* LP token pricing,
+* risk analysis.
+
+---
+
+# 15. Liquidation Threshold Per Asset
+
+Each asset must define:
+
+```text
+liquidationThreshold
+```
+
+Constraints:
+
+* minimum = 90%
+* maximum = 100%
+
+Examples:
+
+* 90% => liquidation before full margin loss,
+* 100% => liquidation only at total margin depletion.
+
+---
+
+# 16. Liquidation Price Formula
+
+Long:
+
+```text
+move =
+openPrice * liquidationThreshold / leverage
+
+liqPrice =
+openPrice - move
+```
+
+Short:
+
+```text
+liqPrice =
+openPrice + move
+```
+
+---
+
+# 17. Add Margin
+
+Function:
+
+```text
+addMargin(tradeId, amount)
+```
+
+Behavior:
+
+* transfer USDC,
+* increase trade margin,
+* recalculate liquidation price.
+
+Must NOT modify:
+
+* open interest,
+* LP locked capital,
+* funding index,
+* weighted averages,
+* exposure.
+
+---
+
+# 18. Remove Margin / Partial Close
+
+Function:
+
+```text
+removeMargin(tradeId, amount)
+```
+
+This acts as:
+
+* partial close,
+* proportional realization of PnL.
+
+---
+
+# 19. Partial Close Logic
+
+If:
+
+```text
+ratio = amount / currentMargin
+```
+
+Then proportionally reduce:
+
+* margin,
+* openInterest,
+* lpLockedCapital,
+* trader exposure,
+* riskLong/riskShort,
+* weighted OI contribution.
+
+Realized PnL:
+
+```text
+realizedPnl =
+totalPnl * ratio
+```
+
+If positive:
+
+* trader receives profit.
+
+If negative:
+
+* trader realizes loss.
 
 Then:
 
-`delta_unlocked = asset_locked_before - asset_locked_after`
-
-Important constraint:
-
-**Closing a position must NEVER increase locked capital.**
-
-At worst, locked capital remains unchanged.
-In most cases, it decreases.
-
-This must be strictly enforced.
+* remaining trade continues with reduced size.
 
 ---
 
-## **5. Global Locked Capital (Vault Responsibility)**
+# 20. Public LP Deposits
 
-The Vault must track:
+Vault becomes public.
 
-`total_locked_capital`
+Anyone can deposit USDC.
 
-This value must represent the sum across all assets of:
-
-`max(lp_locked_long, lp_locked_short)`
-
-The Vault must also expose:
-
-`free_capital = vault_balance - total_locked_capital`
-
-This is the only capital available to back new positions.
+Vault mints LP shares.
 
 ---
 
-## **6. Trade Acceptance Rule (Critical)**
+# 21. LP Token Price
 
-Before opening a new position, the Core must:
+Formula:
 
-* compute `delta_locked` (as defined above),
-* fetch or verify Vault free capital,
-* enforce:
+```text
+lpPrice =
+(vaultBalance + unrealizedPnL)
+/
+totalLpSupply
+```
 
-If `free_capital >= delta_locked` → accept trade
-Else → reject trade
+Where:
 
-This is a **hard constraint**. No trade should be opened without sufficient backing liquidity.
+* unrealizedPnL can be positive or negative.
 
----
+Positive unrealized trader PnL:
 
-## **7. Settlement Logic (Strict MVP Behavior)**
+* vault owes traders,
+* LP token value decreases.
 
-The settlement must follow strictly:
+Negative unrealized trader PnL:
 
-If trader is profitable:
-
-* trader receives:
-
-  * full collateral (from Core),
-  * profit (from Vault).
-
-If trader is at a loss:
-
-* loss is deducted from collateral,
-* loss is transferred from Core collateral to Vault,
-* remaining collateral is returned to trader.
-
-If loss ≥ collateral:
-
-* trader loses entire collateral,
-* Vault receives full collateral.
-
-The Vault must be called with:
-
-* `settle(profit, 0)` OR
-* `settle(0, loss)`
-
-Never both at the same time.
+* vault is profitable,
+* LP token value increases.
 
 ---
 
-## **8. Commission Logic**
+# 22. Unrealized PnL Calculation
 
-Commission must:
+Must use:
 
-* be charged **only at position opening**,
-* be transferred immediately to the Vault,
-* never be charged at closing.
+* ONE Pyth proof containing ALL active assets.
 
-No additional fee logic is required at this stage.
+Verification:
 
----
+* proof contains every active listed asset,
+* proof count == activeAssetCount,
+* prices are fresh,
+* prices are not future timestamps.
 
-## **9. Emergency Mode**
+For each asset:
 
-A dedicated emergency function must be implemented.
+Long unrealized PnL:
 
-When:
+```text
+longPnl =
+longOI *
+(currentPrice - avgOpenLong)
+/
+avgOpenLong
+```
 
-* protocol is paused, or
-* emergency mode is activated,
+Short unrealized PnL:
 
-users must be able to call:
+```text
+shortPnl =
+shortOI *
+(avgOpenShort - currentPrice)
+/
+avgOpenShort
+```
 
-**emergency_close**
+Cap:
 
-This function must:
+```text
+pnl <= riskLong/riskShort
+```
 
-* allow closing even when paused,
-* return **100% of collateral** to the trader,
-* NOT compute PnL,
-* NOT use oracle price,
-* NOT apply any spread,
-* NOT interact with Vault for profit,
-* mark position as `EmergencyClosed`,
-* fully remove position from all accounting (OI, priced OI, LP locked).
+Global:
 
-This ensures users are never stuck.
-
----
-
-## **10. Asset Validation and Delisting**
-
-Before opening a position:
-
-* the asset must exist,
-* the asset must be enabled.
-
-If not → reject.
-
-If an asset is disabled (delisted):
-
-* users must still be able to **close existing positions**,
-* users must NOT be able to **open new positions**.
+```text
+unrealizedPnl =
+sum(all asset pnl)
+```
 
 ---
 
-## **11. Priority Scope (What NOT to Implement Yet)** — **OUTDATED**
+# 23. LP Deposit Flow
 
-> **Status (authoritative doc, outdated subsection):** Sections **1–10** and **12** remain the specification for accounting, settlement, and capital rules. This section’s **deferral list is obsolete**: product priorities have moved on (e.g. cumulative funding, automation/keepers, and risk features may be implemented when specified elsewhere). Do **not** use the bullet list below to block current work.
+User:
 
-**Original deferral list (historical only — do not treat as current scope):**
+* sends USDC.
 
-* spread,
-* alpha / K risk models,
-* funding rates,
-* imbalance penalties,
-* liquidation mechanisms,
-* stop loss / take profit,
-* keepers or automation.
+Protocol:
 
-**Enduring goal (still applies):**
+* computes current LP price,
+* mints proportional LP shares.
 
-**correct accounting + correct settlement + correct capital management** — any new feature must preserve these invariants.
+Formula:
 
----
+```text
+sharesMinted =
+depositAmount / lpPrice
+```
 
-## **12. Future Use of Average Prices (Important Context)**
-
-The weighted average entry prices (long and short) will later be used inside the Vault to:
-
-* compute unrealized PnL across all traders,
-* determine the net position of the protocol,
-* calculate LP token price dynamically.
-
-Developers must ensure these values are accurate and continuously updated, even if unused for now.
+USDC enters Vault.
 
 ---
 
-## **Final Summary**
+# 24. LP Withdraw Flow
 
-The system must guarantee:
+User specifies:
 
-* multiple independent positions per user,
-* exact per-asset long/short accounting,
-* correct LP capital locking using `max(long, short)`,
-* correct global locked capital tracking in the Vault,
-* strict liquidity checks before opening trades,
-* proper settlement between Core and Vault,
-* one-time commission at opening,
-* safe emergency exit mechanism.
+```text
+lpSharesToBurn
+```
 
-Correctness and consistency remain mandatory; advanced trading logic is in scope when explicitly specified (see §11 — outdated deferral list).
+Protocol:
+
+* computes LP token price,
+* converts shares into USDC value.
+
+Formula:
+
+```text
+withdrawAmount =
+lpShares * lpPrice
+```
+
+Then:
+
+* verify enough free capital exists,
+* burn LP shares,
+* transfer USDC.
+
+Withdrawals MUST NEVER use locked capital.
+
+---
+
+# 25. Free Capital
+
+Vault must maintain:
+
+```text
+totalLockedCapital
+```
+
+And:
+
+```text
+freeCapital =
+vaultBalance - totalLockedCapital
+```
+
+Only free capital:
+
+* can be withdrawn,
+* can pay trader profits,
+* can support new trades.
+
+---
+
+# 26. Oracle Requirements
+
+All unrealized PnL and LP pricing must:
+
+* use a single merged proof,
+* validate all active assets,
+* validate timestamps,
+* reject incomplete proofs.
+
+This is mandatory for secure LP pricing.

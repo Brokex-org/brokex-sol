@@ -6,6 +6,7 @@ use crate::error::CoreError;
 #[derive(AnchorSerialize, AnchorDeserialize)]
 pub struct AssetConfigInput {
     pub commission_open_bps: u64,
+    pub base_spread_bps: u64,
 }
 
 #[derive(Accounts)]
@@ -48,6 +49,7 @@ pub fn add_asset_handler(
 
     // Initialize config
     asset.commission_open_bps = config_input.commission_open_bps;
+    asset.base_spread_bps = config_input.base_spread_bps;
 
     // Initialize state
     asset.oi_long = 0;

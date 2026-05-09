@@ -4,7 +4,7 @@ use crate::state::*;
 use crate::constants::*;
 use crate::oracle;
 use crate::error::CoreError;
-use crate::logic::{calculate_liquidation_price, validate_sl_tp};
+use crate::logic::{calculate_liquidation_price, execution_price_with_spread, validate_sl_tp};
 
 #[derive(Accounts)]
 #[instruction(asset_id: String)]
@@ -107,8 +107,14 @@ pub fn open_position_handler(
         200,
     )?;
 
-    // MVP: No Spread
-    let entry_price = oracle_price;
+    let entry_price = execution_price_with_spread(
+        oracle_price,
+        asset.base_spread_bps,
+        direction,
+        false,
+        asset.oi_long,
+        asset.oi_short,
+    )?;
 
     // For Market orders, we charge commission and execute immediately.
     // For Limit/Stop orders, we only transfer collateral; commission and execution happen later.
@@ -240,7 +246,13 @@ pub fn open_position_handler(
     position.bump = ctx.bumps.position;
     ctx.accounts.config.next_position_id = position_id.checked_add(1).ok_or(CoreError::Overflow)?;
 
-    msg!("Position opened: ID={}, Price={}, Size={}, Locked={}", position.asset_id, entry_price, oi, delta_locked);
+    msg!(
+        "Position opened: ID={}, Price={}, Size={}, Locked={}",
+        position.asset_id,
+        actual_entry_price,
+        oi,
+        delta_locked
+    );
 
     Ok(())
 }

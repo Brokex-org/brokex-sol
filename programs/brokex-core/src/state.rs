@@ -23,6 +23,8 @@ pub struct Asset {
 
     // Config
     pub commission_open_bps: u64,
+    /// Base spread as bps of oracle price; dynamic skew scales effective spread (see `logic::execution_price_with_spread`).
+    pub base_spread_bps: u64,
 
     // State
     pub oi_long: u64,

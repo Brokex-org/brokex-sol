@@ -53,6 +53,10 @@ jobs:
       - name: Set Solana cluster to devnet
         run: solana config set --url devnet
 
+      # Anchor.toml points at this wallet; generate an ephemeral CI-only keypair.
+      - name: Create CI provider wallet
+        run: solana-keygen new --no-bip39-passphrase --force --outfile keys/devnet-admin.json
+
       - name: Build Anchor programs (production)
         run: anchor build
 

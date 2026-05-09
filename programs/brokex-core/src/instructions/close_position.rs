@@ -6,6 +6,7 @@ use brokex_vault::VaultState;
 
 use crate::constants::*;
 use crate::error::CoreError;
+use crate::logic::execution_price_with_spread;
 use crate::oracle;
 use crate::state::*;
 
@@ -99,13 +100,27 @@ pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String, _tr
         200,
     )?;
 
+    let (oi_long, oi_short, base_spread_bps, pos_direction, pos_size) = {
+        let asset = &ctx.accounts.asset;
+        (
+            asset.oi_long,
+            asset.oi_short,
+            asset.base_spread_bps,
+            ctx.accounts.position.direction,
+            ctx.accounts.position.size,
+        )
+    };
+
+    let close_price = execution_price_with_spread(
+        oracle_price,
+        base_spread_bps,
+        pos_direction,
+        true,
+        oi_long,
+        oi_short,
+    )?;
+
     let asset = &mut ctx.accounts.asset;
-
-    // MVP: No Spread
-    let close_price = oracle_price;
-
-    // Capture data from position to avoid borrow checker issues later
-    let (pos_direction, pos_size) = (ctx.accounts.position.direction, ctx.accounts.position.size);
 
     // Capital Unlocking Logic 
     let locked_before = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);

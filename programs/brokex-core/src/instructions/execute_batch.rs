@@ -4,7 +4,7 @@ use crate::state::*;
 use crate::constants::*;
 use crate::oracle;
 use crate::error::CoreError;
-use crate::logic::{calculate_liquidation_price, validate_sl_tp};
+use crate::logic::{calculate_liquidation_price, execution_price_with_spread, validate_sl_tp};
 use brokex_vault::cpi::{accounts::VaultSettle, settle};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
@@ -225,15 +225,28 @@ fn execute_order_open<'info>(
     ctx: &mut Context<'info, ExecuteBatch<'info>>,
     position: &mut Position,
     position_info: &AccountInfo<'info>,
-    execution_price: u64,
+    oracle_price: u64,
 ) -> Result<()> {
+    let (oi_long, oi_short, base_spread_bps, commission_open_bps) = {
+        let a = &ctx.accounts.asset;
+        (a.oi_long, a.oi_short, a.base_spread_bps, a.commission_open_bps)
+    };
+    let execution_price = execution_price_with_spread(
+        oracle_price,
+        base_spread_bps,
+        position.direction,
+        false,
+        oi_long,
+        oi_short,
+    )?;
+
     validate_sl_tp(execution_price, position.direction, position.sl_price, position.tp_price)?;
 
     let asset = &mut ctx.accounts.asset;
     let collateral = position.collateral;
 
     let commission = collateral
-        .checked_mul(asset.commission_open_bps)
+        .checked_mul(commission_open_bps)
         .ok_or(CoreError::Overflow)?
         / 10_000;
 
@@ -310,9 +323,22 @@ fn execute_order_close<'info>(
     position: &mut Position,
     position_info: &AccountInfo<'info>,
     trader_token_account: &AccountInfo<'info>,
-    execution_price: u64,
+    oracle_price: u64,
     is_liquidation: bool,
 ) -> Result<()> {
+    let (oi_long, oi_short, base_spread_bps) = {
+        let a = &ctx.accounts.asset;
+        (a.oi_long, a.oi_short, a.base_spread_bps)
+    };
+    let execution_price = execution_price_with_spread(
+        oracle_price,
+        base_spread_bps,
+        position.direction,
+        true,
+        oi_long,
+        oi_short,
+    )?;
+
     let pnl = signed_pnl(position.size, position.entry_price, execution_price, position.direction)?;
 
     let (vault_pay_trader_profit, vault_collect_loss, core_pay_trader) = if is_liquidation {

@@ -205,7 +205,7 @@ async function main() {
     if (!existing) {
       console.log(`Adding asset ${assetId} (feed ${desiredFeed.toBase58()})...`);
       await coreProgram.methods
-        .addAsset(assetId, desiredFeed, { commissionOpenBps: new anchor.BN(0) })
+        .addAsset(assetId, desiredFeed, { commissionOpenBps: new anchor.BN(0), baseSpreadBps: new anchor.BN(0) })
         .accounts({
           asset: assetPda,
           config: configPda,

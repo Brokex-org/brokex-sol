@@ -151,6 +151,10 @@ pub fn skew_p_smoothstep(oi_long: u64, oi_short: u64) -> u128 {
 }
 
 /// Numerator for `spread / baseSpread` scaled by PRECISION (dominant: 1+3p, minority: 1-0.2p).
+///
+/// `skew_p` is expected from [`skew_p_smoothstep`], hence in `[0, PRECISION]`; then `skew_p / 5 <= PRECISION / 5`
+/// and `minority_nr >= 4 * PRECISION / 5`. If a caller ever passed `skew_p > 5 * PRECISION`,
+/// `saturating_sub` would floor `minority_nr` to `0` (zero incremental spread scale on the minority side).
 fn spread_scale_numerator(trade_is_long: bool, oi_long: u64, oi_short: u64, skew_p: u128) -> u128 {
     let p = PRECISION;
     let dominant_nr = p.saturating_add(skew_p.saturating_mul(3));
@@ -208,10 +212,10 @@ pub fn execution_price_with_spread(
             .ok_or(CoreError::Overflow.into()),
         (PositionDirection::Short, false) => oracle_price
             .checked_sub(spread_u64)
-            .ok_or(CoreError::InvalidPrice.into()),
+            .ok_or(CoreError::Overflow.into()),
         (PositionDirection::Long, true) => oracle_price
             .checked_sub(spread_u64)
-            .ok_or(CoreError::InvalidPrice.into()),
+            .ok_or(CoreError::Overflow.into()),
         (PositionDirection::Short, true) => oracle_price
             .checked_add(spread_u64)
             .ok_or(CoreError::Overflow.into()),
@@ -371,6 +375,7 @@ pub fn validate_sl_tp(reference_price: u64, direction: PositionDirection, sl_pri
     Ok(())
 }
 
+/// `liquidation_threshold_bps` is validated in `add_asset_handler` (9000..=10000).
 pub fn calculate_liquidation_price(
     entry_price: u64,
     leverage: u8,
@@ -379,17 +384,15 @@ pub fn calculate_liquidation_price(
 ) -> Result<u64> {
     require!(entry_price > 0, CoreError::InvalidReferencePrice);
     require!(leverage > 0, CoreError::Overflow);
-    require!(
-        (9000..=10000).contains(&liquidation_threshold_bps),
-        CoreError::InvalidLiquidationThreshold
-    );
 
+    // Single division: `move = entry * threshold / (10_000 * leverage)` avoids truncating by `10_000` first.
+    let denom = (10_000u128)
+        .checked_mul(leverage as u128)
+        .ok_or(CoreError::Overflow)?;
     let move_amount_u128 = (entry_price as u128)
         .checked_mul(liquidation_threshold_bps as u128)
         .ok_or(CoreError::Overflow)?
-        .checked_div(10_000)
-        .ok_or(CoreError::Overflow)?
-        .checked_div(leverage as u128)
+        .checked_div(denom)
         .ok_or(CoreError::Overflow)?;
     let move_amount = u64::try_from(move_amount_u128).map_err(|_| error!(CoreError::Overflow))?;
 
@@ -493,6 +496,37 @@ mod tests {
     use crate::state::PositionDirection;
 
     #[test]
+    fn zero_base_spread_bps_returns_oracle_unchanged() {
+        let oracle = 123_456_789u64;
+        for is_close in [false, true] {
+            assert_eq!(
+                execution_price_with_spread(
+                    oracle,
+                    0,
+                    PositionDirection::Long,
+                    is_close,
+                    900,
+                    100
+                )
+                .unwrap(),
+                oracle
+            );
+            assert_eq!(
+                execution_price_with_spread(
+                    oracle,
+                    0,
+                    PositionDirection::Short,
+                    is_close,
+                    900,
+                    100
+                )
+                .unwrap(),
+                oracle
+            );
+        }
+    }
+
+    #[test]
     fn symmetric_book_entry_matches_base_spread_bps() {
         let oracle = 100_000_000u64;
         let bps = 100u64;
@@ -590,11 +624,23 @@ mod tests {
     }
 
     #[test]
-    fn liquidation_threshold_affects_move_amount() {
+    fn liquidation_threshold_affects_move_amount_long() {
         let entry = 1_000_000u64;
         let lev = 10u8;
         let liq_100 = calculate_liquidation_price(entry, lev, 10_000, PositionDirection::Long).unwrap();
         let liq_90 = calculate_liquidation_price(entry, lev, 9_000, PositionDirection::Long).unwrap();
         assert!(liq_90 > liq_100, "90% threshold should liquidate earlier for longs");
+    }
+
+    #[test]
+    fn liquidation_threshold_affects_move_amount_short() {
+        let entry = 1_000_000u64;
+        let lev = 10u8;
+        let liq_100 = calculate_liquidation_price(entry, lev, 10_000, PositionDirection::Short).unwrap();
+        let liq_90 = calculate_liquidation_price(entry, lev, 9_000, PositionDirection::Short).unwrap();
+        assert!(
+            liq_90 < liq_100,
+            "lower threshold should yield lower short liq price (earlier liquidation on adverse move)"
+        );
     }
 }

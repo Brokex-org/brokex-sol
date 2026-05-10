@@ -6,6 +6,7 @@ use brokex_vault::VaultState;
 
 use crate::constants::*;
 use crate::error::CoreError;
+use crate::logic::capital_delta_close_remove_side;
 use crate::oracle;
 use crate::state::*;
 
@@ -105,37 +106,29 @@ pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String, _tr
     let close_price = oracle_price;
 
     // Capture data from position to avoid borrow checker issues later
-    let (pos_direction, pos_size) = (ctx.accounts.position.direction, ctx.accounts.position.size);
+    let (pos_direction, _pos_size, lp_remove) = (
+        ctx.accounts.position.direction,
+        ctx.accounts.position.size,
+        ctx.accounts.position.lp_locked_capital,
+    );
 
-    // Capital Unlocking Logic 
-    let locked_before = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);
-    
-    let (new_lp_locked_long, new_lp_locked_short) = if pos_direction == PositionDirection::Long {
-        (
-            asset
-                .lp_locked_long
-                .checked_sub(pos_size)
-                .ok_or(CoreError::InvariantViolation)?,
-            asset.lp_locked_short,
-        )
-    } else {
-        (
-            asset.lp_locked_long,
-            asset
-                .lp_locked_short
-                .checked_sub(pos_size)
-                .ok_or(CoreError::InvariantViolation)?,
-        )
-    };
-    let locked_after = std::cmp::max(new_lp_locked_long, new_lp_locked_short);
-    let delta_unlocked = locked_before.saturating_sub(locked_after);
+    let (new_rl, new_rs, delta_unlocked) = capital_delta_close_remove_side(
+        asset.lp_locked_long,
+        asset.lp_locked_short,
+        pos_direction == PositionDirection::Long,
+        lp_remove,
+        asset.alpha_min_fp,
+        asset.alpha_scale,
+    )?;
 
     // Settlement Calculation
     let (final_state, core_pay_trader, vault_pay_trader_profit, vault_collect_loss) =
         calculate_settlement(&ctx.accounts.position, close_price)?;
     
-    // Internal state updates
+    // Internal state updates (OI / priced OI; LP risk totals set from need-lock simulation above)
     unwind_asset_open_interest(asset, &ctx.accounts.position)?;
+    asset.lp_locked_long = new_rl;
+    asset.lp_locked_short = new_rs;
     
     let ts = Clock::get()?.unix_timestamp;
     let pm = &mut ctx.accounts.position;
@@ -256,10 +249,6 @@ fn unwind_asset_open_interest(asset: &mut Account<'_, Asset>, position: &Positio
             .oi_long
             .checked_sub(position.size)
             .ok_or(CoreError::InvariantViolation)?;
-        asset.lp_locked_long = asset
-            .lp_locked_long
-            .checked_sub(position.size)
-            .ok_or(CoreError::InvariantViolation)?;
         asset.sum_priced_oi_long = asset
             .sum_priced_oi_long
             .checked_sub(priced_oi)
@@ -267,10 +256,6 @@ fn unwind_asset_open_interest(asset: &mut Account<'_, Asset>, position: &Positio
     } else {
         asset.oi_short = asset
             .oi_short
-            .checked_sub(position.size)
-            .ok_or(CoreError::InvariantViolation)?;
-        asset.lp_locked_short = asset
-            .lp_locked_short
             .checked_sub(position.size)
             .ok_or(CoreError::InvariantViolation)?;
         asset.sum_priced_oi_short = asset

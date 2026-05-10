@@ -73,6 +73,11 @@ describe("brokex-core-lifecycle", () => {
     return cfg.nextPositionId as BN;
   }
 
+  async function vaultTotalLocked(): Promise<BN> {
+    const vs = await vaultProgram.account.vaultState.fetch(vaultStatePda);
+    return vs.totalLockedCapital as BN;
+  }
+
   async function ensureProtocolUnpaused(): Promise<void> {
     const cfg = await coreProgram.account.protocolConfig.fetch(configPda);
     if (cfg.isPaused) {
@@ -250,6 +255,9 @@ describe("brokex-core-lifecycle", () => {
       const addAssetBuilder = coreProgram.methods
         .addAsset(assetId, oracle60.publicKey, {
           commissionOpenBps: new anchor.BN(0),
+          profitCapFp: new anchor.BN(0),
+          alphaMinFp: new anchor.BN(0),
+          alphaScale: new anchor.BN(0),
         })
         .accountsPartial({
           asset: assetPda,
@@ -363,6 +371,71 @@ describe("brokex-core-lifecycle", () => {
       .signers([trader])
       .rpc();
     await assertAccountExists(positionPda, "position");
+  });
+
+  it("keeps vault total_locked_capital in sync through openPosition and closePosition", async () => {
+    const lockedBefore = await vaultTotalLocked();
+    const tradeId = await currentPositionId();
+    const positionPda = derivePositionPda(trader.publicKey, assetId, tradeId);
+    await coreProgram.methods
+      .openPosition(
+        assetId,
+        new BN(100_000_000),
+        10,
+        { long: {} },
+        { market: {} },
+        new BN(0),
+        defaultSlPrice,
+        defaultTpPrice
+      )
+      .accountsPartial({
+        trader: trader.publicKey,
+        config: configPda,
+        asset: assetPda,
+        pythPriceUpdate: oracle60.publicKey,
+        position: positionPda,
+        traderTokenAccount: traderAta,
+        vaultTokenAccount: vaultTokenAta,
+        coreCollateralToken: coreCollateralAta,
+        vaultState: vaultStatePda,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([trader])
+      .rpc();
+
+    const lockedOpen = await vaultTotalLocked();
+    assert.ok(
+      lockedOpen.gt(lockedBefore),
+      "market open should CPI-increase vault total_locked_capital"
+    );
+
+    await coreProgram.methods
+      .closePosition(assetId, tradeId)
+      .accountsPartial({
+        trader: trader.publicKey,
+        config: configPda,
+        asset: assetPda,
+        position: positionPda,
+        pythPriceUpdate: oracle70.publicKey,
+        vaultTokenAccount: vaultTokenAta,
+        traderTokenAccount: traderAta,
+        coreCollateralToken: coreCollateralAta,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
+        vaultState: vaultStatePda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .signers([trader])
+      .rpc();
+
+    const lockedAfter = await vaultTotalLocked();
+    assert.ok(
+      lockedAfter.eq(lockedBefore),
+      "close should restore vault total_locked_capital (full Anchor flow, not logic-only unit tests)"
+    );
   });
 
   it("opens and closes in profit", async () => {

@@ -4,7 +4,10 @@ use crate::state::*;
 use crate::constants::*;
 use crate::oracle;
 use crate::error::CoreError;
-use crate::logic::{calculate_liquidation_price, validate_sl_tp};
+use crate::logic::{
+    calculate_liquidation_price, validate_sl_tp, capital_delta_open_add_side,
+    capital_delta_close_remove_side, trade_lp_locked_capital,
+};
 use brokex_vault::cpi::{accounts::VaultSettle, settle};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
@@ -240,14 +243,15 @@ fn execute_order_open<'info>(
     let margin = collateral.saturating_sub(commission);
     let oi = margin.checked_mul(position.leverage as u64).ok_or(CoreError::Overflow)?;
 
-    let locked_before = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);
-    let (new_lp_locked_long, new_lp_locked_short) = if position.direction == PositionDirection::Long {
-        (asset.lp_locked_long.checked_add(oi).ok_or(CoreError::Overflow)?, asset.lp_locked_short)
-    } else {
-        (asset.lp_locked_long, asset.lp_locked_short.checked_add(oi).ok_or(CoreError::Overflow)?)
-    };
-    let locked_after = std::cmp::max(new_lp_locked_long, new_lp_locked_short);
-    let delta_locked = locked_after.saturating_sub(locked_before);
+    let contrib = trade_lp_locked_capital(oi, asset.profit_cap_fp)?;
+    let (new_rl, new_rs, delta_locked) = capital_delta_open_add_side(
+        asset.lp_locked_long,
+        asset.lp_locked_short,
+        position.direction == PositionDirection::Long,
+        contrib,
+        asset.alpha_min_fp,
+        asset.alpha_scale,
+    )?;
 
     let vault_balance = ctx.accounts.vault_token_account.amount;
     let free_capital = vault_balance.saturating_sub(ctx.accounts.vault_state.total_locked_capital);
@@ -279,21 +283,21 @@ fn execute_order_open<'info>(
 
     if position.direction == PositionDirection::Long {
         asset.oi_long = asset.oi_long.checked_add(oi).ok_or(CoreError::Overflow)?;
-        asset.lp_locked_long = asset.lp_locked_long.checked_add(oi).ok_or(CoreError::Overflow)?;
         let priced_oi = (oi as u128).checked_mul(execution_price as u128).ok_or(CoreError::Overflow)?;
         asset.sum_priced_oi_long = asset.sum_priced_oi_long.checked_add(priced_oi).ok_or(CoreError::Overflow)?;
     } else {
         asset.oi_short = asset.oi_short.checked_add(oi).ok_or(CoreError::Overflow)?;
-        asset.lp_locked_short = asset.lp_locked_short.checked_add(oi).ok_or(CoreError::Overflow)?;
         let priced_oi = (oi as u128).checked_mul(execution_price as u128).ok_or(CoreError::Overflow)?;
         asset.sum_priced_oi_short = asset.sum_priced_oi_short.checked_add(priced_oi).ok_or(CoreError::Overflow)?;
     }
+    asset.lp_locked_long = new_rl;
+    asset.lp_locked_short = new_rs;
 
     position.collateral = margin;
     position.size = oi;
     position.entry_price = execution_price;
     position.liquidation_price = calculate_liquidation_price(execution_price, position.leverage, position.direction)?;
-    position.lp_locked_capital = oi;
+    position.lp_locked_capital = contrib;
     position.state = PositionState::Open;
     position.execution_status = ExecutionStatus::Executed;
     position.open_time = Clock::get()?.unix_timestamp;
@@ -328,21 +332,15 @@ fn execute_order_close<'info>(
     };
 
     let asset = &mut ctx.accounts.asset;
-    let locked_before = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);
-
-    let priced_oi = (position.size as u128).checked_mul(position.entry_price as u128).ok_or(CoreError::Overflow)?;
-    if position.direction == PositionDirection::Long {
-        asset.oi_long = asset.oi_long.saturating_sub(position.size);
-        asset.lp_locked_long = asset.lp_locked_long.saturating_sub(position.size);
-        asset.sum_priced_oi_long = asset.sum_priced_oi_long.saturating_sub(priced_oi);
-    } else {
-        asset.oi_short = asset.oi_short.saturating_sub(position.size);
-        asset.lp_locked_short = asset.lp_locked_short.saturating_sub(position.size);
-        asset.sum_priced_oi_short = asset.sum_priced_oi_short.saturating_sub(priced_oi);
-    }
-
-    let locked_after = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);
-    let delta_unlocked = locked_before.saturating_sub(locked_after);
+    let contrib = position.lp_locked_capital;
+    let (new_rl, new_rs, delta_unlocked) = capital_delta_close_remove_side(
+        asset.lp_locked_long,
+        asset.lp_locked_short,
+        position.direction == PositionDirection::Long,
+        contrib,
+        asset.alpha_min_fp,
+        asset.alpha_scale,
+    )?;
 
     let bump = ctx.bumps.settlement_authority;
     let bump_seed = [bump];
@@ -380,6 +378,29 @@ fn execute_order_close<'info>(
         let cpi_ctx = CpiContext::new_with_signer(ctx.accounts.vault_program.to_account_info().key(), cpi_accounts, signers);
         settle(cpi_ctx, vault_pay_trader_profit, vault_collect_loss)?;
     }
+
+    let priced_oi = (position.size as u128).checked_mul(position.entry_price as u128).ok_or(CoreError::Overflow)?;
+    if position.direction == PositionDirection::Long {
+        asset.oi_long = asset
+            .oi_long
+            .checked_sub(position.size)
+            .ok_or(CoreError::InvariantViolation)?;
+        asset.sum_priced_oi_long = asset
+            .sum_priced_oi_long
+            .checked_sub(priced_oi)
+            .ok_or(CoreError::InvariantViolation)?;
+    } else {
+        asset.oi_short = asset
+            .oi_short
+            .checked_sub(position.size)
+            .ok_or(CoreError::InvariantViolation)?;
+        asset.sum_priced_oi_short = asset
+            .sum_priced_oi_short
+            .checked_sub(priced_oi)
+            .ok_or(CoreError::InvariantViolation)?;
+    }
+    asset.lp_locked_long = new_rl;
+    asset.lp_locked_short = new_rs;
 
     position.state = if is_liquidation {
         PositionState::Liquidated

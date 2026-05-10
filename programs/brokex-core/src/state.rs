@@ -23,6 +23,12 @@ pub struct Asset {
 
     // Config
     pub commission_open_bps: u64,
+    /// Risk contribution per trade: `oi * profit_cap_fp / PRECISION` (fixed-point, see `logic::PRECISION`).
+    pub profit_cap_fp: u64,
+    /// Minimum alpha in fixed-point on `PRECISION` (e.g. `800_000` = 0.8).
+    pub alpha_min_fp: u64,
+    /// Depth denominator scale (same units as aggregate risk); larger ⇒ shallower depth.
+    pub alpha_scale: u64,
 
     // State
     pub oi_long: u64,

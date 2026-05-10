@@ -5,10 +5,9 @@ use crate::constants::*;
 use crate::oracle;
 use crate::error::CoreError;
 use crate::logic::{
-    calculate_liquidation_price, funding_fee_amount, funding_index_for_direction, sync_risk_from_oi,
-    touch_asset_funding, validate_sl_tp,
-    capital_delta_open_add_side,
-    capital_delta_close_remove_side, trade_lp_locked_capital,
+    calculate_liquidation_price, capital_delta_close_remove_side, capital_delta_open_add_side,
+    execution_price_with_spread, funding_fee_amount, funding_index_for_direction,
+    sync_risk_from_oi, touch_asset_funding, trade_lp_locked_capital, validate_sl_tp,
 };
 use brokex_vault::cpi::{accounts::VaultSettle, settle};
 
@@ -230,8 +229,20 @@ fn execute_order_open<'info>(
     ctx: &mut Context<'info, ExecuteBatch<'info>>,
     position: &mut Position,
     position_info: &AccountInfo<'info>,
-    execution_price: u64,
+    oracle_mark: u64,
 ) -> Result<()> {
+    let (oi_snap_l, oi_snap_s, base_spread_fp) = {
+        let a = &ctx.accounts.asset;
+        (a.oi_long, a.oi_short, a.base_spread_fp)
+    };
+    let execution_price = execution_price_with_spread(
+        oracle_mark,
+        base_spread_fp,
+        position.direction,
+        false,
+        oi_snap_l,
+        oi_snap_s,
+    )?;
     validate_sl_tp(execution_price, position.direction, position.sl_price, position.tp_price)?;
 
     let asset = &mut ctx.accounts.asset;
@@ -322,13 +333,26 @@ fn execute_order_close<'info>(
     position: &mut Position,
     position_info: &AccountInfo<'info>,
     trader_token_account: &AccountInfo<'info>,
-    execution_price: u64,
+    oracle_mark: u64,
     is_liquidation: bool,
 ) -> Result<()> {
     let oi = position.size;
     let open_idx = position.open_funding_index;
     let col = position.collateral;
     let dir = position.direction;
+
+    let (oi_snap_l, oi_snap_s, base_spread_fp) = {
+        let a = &ctx.accounts.asset;
+        (a.oi_long, a.oi_short, a.base_spread_fp)
+    };
+    let execution_price = execution_price_with_spread(
+        oracle_mark,
+        base_spread_fp,
+        dir,
+        true,
+        oi_snap_l,
+        oi_snap_s,
+    )?;
 
     let asset = &mut ctx.accounts.asset;
     let now = Clock::get()?.unix_timestamp;
@@ -357,7 +381,12 @@ fn execute_order_close<'info>(
         token::transfer(cpi_ctx, funding_fee)?;
     }
 
-    let pnl = signed_pnl(position.size, position.entry_price, execution_price, position.direction)?;
+    let pnl = signed_pnl(
+        position.size,
+        position.entry_price,
+        execution_price,
+        position.direction,
+    )?;
 
     let (vault_pay_trader_profit, vault_collect_loss, core_pay_trader) = if is_liquidation {
         (0, effective_collateral, 0)

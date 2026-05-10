@@ -52,6 +52,7 @@ describe("brokex-core", () => {
     profitCapFp: new anchor.BN(0),
     alphaMinFp: new anchor.BN(0),
     alphaScale: new anchor.BN(0),
+    baseSpreadFp: new anchor.BN(0),
   };
 
   it("initializes the protocol config", async () => {

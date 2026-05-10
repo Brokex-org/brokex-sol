@@ -5,10 +5,9 @@ use crate::constants::*;
 use crate::oracle;
 use crate::error::CoreError;
 use crate::logic::{
-    calculate_liquidation_price, funding_index_for_direction, sync_risk_from_oi, touch_asset_funding,
+    calculate_liquidation_price, capital_delta_open_add_side, execution_price_with_spread,
+    funding_index_for_direction, sync_risk_from_oi, touch_asset_funding, trade_lp_locked_capital,
     validate_sl_tp,
-    capital_delta_open_add_side,
-    trade_lp_locked_capital,
 };
 
 #[derive(Accounts)]
@@ -99,24 +98,35 @@ pub fn open_position_handler(
     tp_price: u64,
 ) -> Result<()> {
     let position_id = ctx.accounts.config.next_position_id;
-    let asset = &mut ctx.accounts.asset;
 
     // Basic Validations
     require!(leverage > 0, CoreError::Overflow);
 
-    let ts = Clock::get()?.unix_timestamp;
-    touch_asset_funding(asset, ts)?;
-
     // Validate price using the oracle logic
     let oracle_price = oracle::get_validated_price(
         &ctx.accounts.pyth_price_update,
-        &asset.pyth_feed.to_bytes(),
+        &ctx.accounts.asset.pyth_feed.to_bytes(),
         60,
         200,
     )?;
 
-    // MVP: No Spread
-    let entry_price = oracle_price;
+    // Pre-trade book only — execution price before funding touch or OI updates (§9).
+    let (oi_snap_l, oi_snap_s, base_spread_fp) = {
+        let a = &ctx.accounts.asset;
+        (a.oi_long, a.oi_short, a.base_spread_fp)
+    };
+    let entry_price = execution_price_with_spread(
+        oracle_price,
+        base_spread_fp,
+        direction,
+        false,
+        oi_snap_l,
+        oi_snap_s,
+    )?;
+
+    let asset = &mut ctx.accounts.asset;
+    let ts = Clock::get()?.unix_timestamp;
+    touch_asset_funding(asset, ts)?;
 
     // For Market orders, we charge commission and execute immediately.
     // For Limit/Stop orders, we only transfer collateral; commission and execution happen later.

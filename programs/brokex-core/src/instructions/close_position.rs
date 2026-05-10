@@ -7,7 +7,8 @@ use brokex_vault::VaultState;
 use crate::constants::*;
 use crate::error::CoreError;
 use crate::logic::{
-    funding_fee_amount, funding_index_for_direction, sync_risk_from_oi, touch_asset_funding,
+    execution_price_with_spread, funding_fee_amount, funding_index_for_direction,
+    sync_risk_from_oi, touch_asset_funding,
 };
 use crate::logic::capital_delta_close_remove_side;
 use crate::oracle;
@@ -103,19 +104,29 @@ pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String, _tr
         200,
     )?;
 
-    let asset = &mut ctx.accounts.asset;
-
-    // MVP: No Spread
-    let close_price = oracle_price;
+    let pos_direction = ctx.accounts.position.direction;
+    let (oi_snap_l, oi_snap_s, base_spread) = {
+        let a = &ctx.accounts.asset;
+        (a.oi_long, a.oi_short, a.base_spread_fp)
+    };
 
     // Capture data from position to avoid borrow checker issues later
-    let (pos_direction, pos_size, open_funding_index, pos_collateral) = (
-        ctx.accounts.position.direction,
+    let (pos_size, open_funding_index, pos_collateral) = (
         ctx.accounts.position.size,
         ctx.accounts.position.open_funding_index,
         ctx.accounts.position.collateral,
     );
 
+    let close_price = execution_price_with_spread(
+        oracle_price,
+        base_spread,
+        pos_direction,
+        true,
+        oi_snap_l,
+        oi_snap_s,
+    )?;
+
+    let asset = &mut ctx.accounts.asset;
     let now = Clock::get()?.unix_timestamp;
     touch_asset_funding(asset, now)?;
     let funding_idx = funding_index_for_direction(asset, pos_direction);

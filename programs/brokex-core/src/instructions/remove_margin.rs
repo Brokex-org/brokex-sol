@@ -7,15 +7,17 @@ use brokex_vault::VaultState;
 use crate::constants::*;
 use crate::error::CoreError;
 use crate::logic::{
-    calculate_liquidation_price, capital_delta_close_remove_side, funding_fee_amount,
-    funding_index_for_direction, sync_risk_from_oi, touch_asset_funding, trade_lp_locked_capital,
- };
+    calculate_liquidation_price, capital_delta_close_remove_side, execution_price_with_spread,
+    funding_fee_amount, funding_index_for_direction, sync_risk_from_oi, touch_asset_funding,
+    trade_lp_locked_capital,
+};
 use crate::oracle;
 use crate::state::*;
 
 /// Partial close / remove margin: proportional OI, LP lock, risk; realize slice PnL and funding on closed OI (Extended MVP §§18–19).
+/// Execution price matches full close: `execution_price_with_spread(oracle, base_spread_fp, dir, true, oi_long, oi_short)` on the pre-trade book (§9).
 /// `lp_locked_capital` after a partial is always `trade_lp_locked_capital(remaining_oi, profit_cap)` so per-position lock stays aligned with §11–12.
-/// Remaining positions must not be liquidatable at the oracle mark used for this instruction (strict inequality vs liq price).
+/// Remaining positions must not be liquidatable at the **spread-adjusted** exit price vs new liq (strict inequality).
 #[derive(Accounts)]
 #[instruction(asset_id: String, trade_id: u64)]
 pub struct RemoveMargin<'info> {
@@ -114,8 +116,6 @@ pub fn remove_margin_handler(
         200,
     )?;
 
-    let close_price = oracle_price;
-
     let (pos_size, pos_entry, pos_dir, open_idx, pos_lp) = (
         ctx.accounts.position.size,
         ctx.accounts.position.entry_price,
@@ -123,6 +123,21 @@ pub fn remove_margin_handler(
         ctx.accounts.position.open_funding_index,
         ctx.accounts.position.lp_locked_capital,
     );
+
+    let (oi_snap_l, oi_snap_s, base_spread_fp) = {
+        let a = &ctx.accounts.asset;
+        (a.oi_long, a.oi_short, a.base_spread_fp)
+    };
+
+    // Exit price from pre-trade book only — before funding touch or OI mutation (§9).
+    let close_price = execution_price_with_spread(
+        oracle_price,
+        base_spread_fp,
+        pos_dir,
+        true,
+        oi_snap_l,
+        oi_snap_s,
+    )?;
 
     let asset = &mut ctx.accounts.asset;
     let now = Clock::get()?.unix_timestamp;

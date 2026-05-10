@@ -32,6 +32,8 @@ pub struct Asset {
     pub alpha_min_fp: u64,
     /// Depth denominator scale (same units as aggregate risk); larger ⇒ shallower depth.
     pub alpha_scale: u64,
+    /// Fixed-point on [`crate::logic::PRECISION`]; execution delta = `oracle * effective_spread / PRECISION`. `0` = no spread.
+    pub base_spread_fp: u64,
 
     // State
     pub oi_long: u64,

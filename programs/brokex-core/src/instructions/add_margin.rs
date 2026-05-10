@@ -7,7 +7,8 @@ use crate::logic::calculate_liquidation_price;
 use crate::state::*;
 
 /// Adds USDC margin to an open position; updates liquidation price only (Extended MVP §17).
-/// Requires the asset to be enabled (same as opening risk). Clients should use the canonical USDC ATA owned by `settlement_authority` (see deploy / `getAtaAddress`).
+/// Allowed when the asset is **disabled** so traders can add collateral and move away from liquidation without opening new risk on the book.
+/// Clients should use the canonical USDC ATA owned by `settlement_authority` (see deploy / `getAtaAddress`).
 #[derive(Accounts)]
 #[instruction(asset_id: String, trade_id: u64)]
 pub struct AddMargin<'info> {
@@ -24,7 +25,6 @@ pub struct AddMargin<'info> {
     #[account(
         seeds = [ASSET_SEED, asset_id.as_bytes()],
         bump,
-        constraint = asset.is_enabled @ CoreError::AssetDisabled
     )]
     pub asset: Box<Account<'info, Asset>>,
 

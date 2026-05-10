@@ -74,6 +74,7 @@ fn test_protocol_flow() {
                 profit_cap_fp: 0,
                 alpha_min_fp: 0,
                 alpha_scale: 0,
+                base_spread_fp: 0,
             }
         }
         .data(),

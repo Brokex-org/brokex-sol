@@ -260,6 +260,7 @@ describe("brokex-core-lifecycle", () => {
           profitCapFp: new anchor.BN(0),
           alphaMinFp: new anchor.BN(0),
           alphaScale: new anchor.BN(0),
+          baseSpreadFp: new anchor.BN(0),
         })
         .accountsPartial({
           asset: assetPda,

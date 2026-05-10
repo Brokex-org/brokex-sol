@@ -17,7 +17,7 @@ pub struct VaultState {
     /// When set, vault instructions that should respect pause are disabled.
     pub paused: bool,
 
-    /// Total capital locked across all assets (sum of max(long, short) per asset).
+    /// Total capital locked across all assets (sum of `needLock` per asset per `@brokex-solana/Extended_MVP.md` §§12–13).
     pub total_locked_capital: u64,
 
     /// PDA bump for the vault state account.

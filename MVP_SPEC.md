@@ -272,19 +272,23 @@ These values are not immediately used for trading logic, but they are critical f
 
 ---
 
-## **3. LP Locked Capital Logic (Per Asset)**
+## **3. LP Locked Capital & Risk (Per Asset)**
 
-The system must strictly follow this rule:
+Per asset, `lp_locked_long` / `lp_locked_short` aggregate **risk** on each side: the sum of each open trade’s `lp_locked_capital` (§11 in `@brokex-solana/Extended_MVP.md`; typically `openInterest * profitCap` in fixed-point).
 
-The effective locked capital for an asset is NOT:
+The effective locked capital for an asset is **not** `lp_locked_long + lp_locked_short`, and not necessarily `max(lp_locked_long, lp_locked_short)` alone.
 
-`lp_locked_long + lp_locked_short`
+Using:
 
-It is:
+* `riskLong = lp_locked_long`, `riskShort = lp_locked_short`
+* `matched = min(riskLong, riskShort)`, `dominant = max(riskLong, riskShort)`
+* `balance = matched / dominant` (0 if `dominant == 0`)
+* `depth = matched / (matched + alphaScale)`
+* `reduction = (1 - alphaMin) * balance * depth`
+* `alpha = max(alphaMin, 1 - reduction)`
+* **`needLock = dominant * alpha`** (fixed-point; see `programs/brokex-core/src/logic.rs`)
 
-`max(lp_locked_long, lp_locked_short)`
-
-This reflects the net exposure of the system.
+When `dominant == 0`, `needLock = 0`.
 
 ---
 
@@ -292,52 +296,21 @@ This reflects the net exposure of the system.
 
 ### On Position Open
 
-When a position is opened:
+1. Compute `oldNeedLock = needLock` from current aggregate risk on the asset.
+2. Simulate aggregate risk after adding this trade’s `lp_locked_capital` to the correct side.
+3. Compute `newNeedLock`.
+4. Lock only **`delta_locked = max(0, newNeedLock - oldNeedLock)`** on the Vault (`update_locked_capital` CPI).
 
-* update the corresponding side (long or short),
-* update OI, priced OI, and LP locked capital,
-* compute:
-
-`asset_locked_before = max(lp_locked_long, lp_locked_short)`
-
-Then simulate the new values:
-
-`asset_locked_after = max(new_lp_locked_long, new_lp_locked_short)`
-
-Then:
-
-`delta_locked = asset_locked_after - asset_locked_before`
-
-This delta represents the **actual additional capital requirement**.
-
----
+The Vault CPI positive delta must equal this incremental need only.
 
 ### On Position Close
 
-When a position is closed:
+1. Compute `oldNeedLock` from current risk **before** unwinding the trade.
+2. Simulate risk after removing this trade’s stored `lp_locked_capital` from its side.
+3. Compute `newNeedLock`.
+4. Unlock only **`delta_unlocked = max(0, oldNeedLock - newNeedLock)`** (Vault CPI negative delta).
 
-* subtract the exact position values from:
-
-  * OI,
-  * priced OI,
-  * LP locked capital (long or short side),
-* recompute:
-
-`asset_locked_before = previous max(...)`
-`asset_locked_after = new max(...)`
-
-Then:
-
-`delta_unlocked = asset_locked_before - asset_locked_after`
-
-Important constraint:
-
-**Closing a position must NEVER increase locked capital.**
-
-At worst, locked capital remains unchanged.
-In most cases, it decreases.
-
-This must be strictly enforced.
+**Invariant:** closing must **never** increase locked capital. If integer rounding or pathologies would imply `newNeedLock > oldNeedLock`, the unlock amount is clamped to zero additional lock (no positive CPI on close).
 
 ---
 
@@ -347,9 +320,7 @@ The Vault must track:
 
 `total_locked_capital`
 
-This value must represent the sum across all assets of:
-
-`max(lp_locked_long, lp_locked_short)`
+This value must represent the sum across all assets of each asset’s **`needLock`** (not naive `max` of raw side notionals unless parameters reduce to that behavior).
 
 The Vault must also expose:
 
@@ -463,7 +434,7 @@ If an asset is disabled (delisted):
 
 ## **11. Priority Scope (What NOT to Implement Yet)** — **OUTDATED**
 
-> **Status:** See **`Extended_MVP.md`** for the authoritative spec. This subsection’s **deferral list is obsolete**; priorities have moved on (e.g. funding, keepers, and other features may be in scope when specified). Do **not** use the bullet list below to block current work.
+> **Status:** See **`@brokex-solana/Extended_MVP.md`** for the authoritative spec. This subsection’s **deferral list is obsolete**; priorities have moved on (e.g. funding, keepers, and other features may be in scope when specified). Do **not** use the bullet list below to block current work.
 
 **Original deferral list (historical only):**
 
@@ -499,7 +470,7 @@ The system must guarantee:
 
 * multiple independent positions per user,
 * exact per-asset long/short accounting,
-* correct LP capital locking using `max(long, short)`,
+* correct LP capital locking using **`needLock`** (alpha-based efficiency per `@brokex-solana/Extended_MVP.md` §§10–13),
 * correct global locked capital tracking in the Vault,
 * strict liquidity checks before opening trades,
 * proper settlement between Core and Vault,

@@ -5,7 +5,9 @@ use crate::constants::*;
 use crate::oracle;
 use crate::error::CoreError;
 use crate::logic::{
-    calculate_liquidation_price, validate_sl_tp, capital_delta_open_add_side,
+    calculate_liquidation_price, funding_index_for_direction, sync_risk_from_oi, touch_asset_funding,
+    validate_sl_tp,
+    capital_delta_open_add_side,
     trade_lp_locked_capital,
 };
 
@@ -101,7 +103,10 @@ pub fn open_position_handler(
 
     // Basic Validations
     require!(leverage > 0, CoreError::Overflow);
-    
+
+    let ts = Clock::get()?.unix_timestamp;
+    touch_asset_funding(asset, ts)?;
+
     // Validate price using the oracle logic
     let oracle_price = oracle::get_validated_price(
         &ctx.accounts.pyth_price_update,
@@ -116,6 +121,11 @@ pub fn open_position_handler(
     // For Market orders, we charge commission and execute immediately.
     // For Limit/Stop orders, we only transfer collateral; commission and execution happen later.
     let is_market = order_type == OrderType::Market;
+    let open_funding_snap = if is_market {
+        funding_index_for_direction(asset, direction)
+    } else {
+        0u128
+    };
     let mut margin = collateral;
 
     if is_market {
@@ -211,11 +221,10 @@ pub fn open_position_handler(
             let priced_oi = (oi as u128).checked_mul(actual_entry_price as u128).ok_or(CoreError::Overflow)?;
             asset.sum_priced_oi_short = asset.sum_priced_oi_short.checked_add(priced_oi).ok_or(CoreError::Overflow)?;
         }
+        sync_risk_from_oi(asset);
         asset.lp_locked_long = new_rl;
         asset.lp_locked_short = new_rs;
     }
-
-
 
     // Store Position
     let position = &mut ctx.accounts.position;
@@ -240,7 +249,8 @@ pub fn open_position_handler(
         validate_sl_tp(target_price, direction, sl_price, tp_price)?;
         0
     };
-    position.open_time = Clock::get()?.unix_timestamp;
+    position.open_funding_index = open_funding_snap;
+    position.open_time = ts;
     position.bump = ctx.bumps.position;
     ctx.accounts.config.next_position_id = position_id.checked_add(1).ok_or(CoreError::Overflow)?;
 

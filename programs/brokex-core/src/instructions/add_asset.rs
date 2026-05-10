@@ -9,6 +9,8 @@ use crate::logic::{
 #[derive(AnchorSerialize, AnchorDeserialize)]
 pub struct AssetConfigInput {
     pub commission_open_bps: u64,
+    pub base_funding_per_year: u64,
+    pub max_funding_per_year: u64,
     /// Fixed-point on [`crate::logic::PRECISION`]; `0` uses [`DEFAULT_PROFIT_CAP_FP`] (full-OI risk).
     pub profit_cap_fp: u64,
     /// Minimum alpha fixed-point; `0` uses [`DEFAULT_ALPHA_MIN_FP`].
@@ -57,6 +59,18 @@ pub fn add_asset_handler(
 
     // Initialize config
     asset.commission_open_bps = config_input.commission_open_bps;
+    let base = config_input.base_funding_per_year;
+    let max = config_input.max_funding_per_year;
+    // Loose sanity: dominant-side cap should not be orders of magnitude below baseline (misconfig).
+    // Integer form of max >= base/2: 2*max >= base when base > 0.
+    if base > 0 {
+        require!(
+            max.saturating_mul(2) >= base,
+            CoreError::InvalidFundingConfig
+        );
+    }
+    asset.base_funding_per_year = base;
+    asset.max_funding_per_year = max;
 
     let profit_cap_fp = if config_input.profit_cap_fp == 0 {
         DEFAULT_PROFIT_CAP_FP
@@ -84,10 +98,15 @@ pub fn add_asset_handler(
     // Initialize state
     asset.oi_long = 0;
     asset.oi_short = 0;
+    asset.risk_long = 0;
+    asset.risk_short = 0;
     asset.sum_priced_oi_long = 0;
     asset.sum_priced_oi_short = 0;
     asset.lp_locked_long = 0;
     asset.lp_locked_short = 0;
+    asset.funding_index_long = 0;
+    asset.funding_index_short = 0;
+    asset.last_funding_update = 0;
     
     msg!("Asset added: {} with feed: {}", asset_id, pyth_feed);
     Ok(())

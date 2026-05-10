@@ -23,6 +23,9 @@ pub struct Asset {
 
     // Config
     pub commission_open_bps: u64,
+    /// Annual funding index increment at a balanced book (`index += rate * dt / YEAR`; fee = OI * Δindex / PRECISION).
+    pub base_funding_per_year: u64,
+    pub max_funding_per_year: u64,
     /// Risk contribution per trade: `oi * profit_cap_fp / PRECISION` (fixed-point, see `logic::PRECISION`).
     pub profit_cap_fp: u64,
     /// Minimum alpha in fixed-point on `PRECISION` (e.g. `800_000` = 0.8).
@@ -33,10 +36,17 @@ pub struct Asset {
     // State
     pub oi_long: u64,
     pub oi_short: u64,
+    /// Mirrors OI notional for future alpha / risk formulas (Extended MVP §11).
+    pub risk_long: u64,
+    pub risk_short: u64,
     pub sum_priced_oi_long: u128, // sum of (OI * price)
     pub sum_priced_oi_short: u128,
     pub lp_locked_long: u64,
     pub lp_locked_short: u64,
+
+    pub funding_index_long: u128,
+    pub funding_index_short: u128,
+    pub last_funding_update: i64,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
@@ -92,5 +102,7 @@ pub struct Position {
     pub open_time: i64,
     pub close_time: i64,
     pub close_price: u64,
+    /// Side funding index snapshot at open (long → long index, short → short index).
+    pub open_funding_index: u128,
     pub bump: u8,
 }

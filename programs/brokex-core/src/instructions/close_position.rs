@@ -6,6 +6,9 @@ use brokex_vault::VaultState;
 
 use crate::constants::*;
 use crate::error::CoreError;
+use crate::logic::{
+    funding_fee_amount, funding_index_for_direction, sync_risk_from_oi, touch_asset_funding,
+};
 use crate::logic::capital_delta_close_remove_side;
 use crate::oracle;
 use crate::state::*;
@@ -106,6 +109,37 @@ pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String, _tr
     let close_price = oracle_price;
 
     // Capture data from position to avoid borrow checker issues later
+    let (pos_direction, pos_size, open_funding_index, pos_collateral) = (
+        ctx.accounts.position.direction,
+        ctx.accounts.position.size,
+        ctx.accounts.position.open_funding_index,
+        ctx.accounts.position.collateral,
+    );
+
+    let now = Clock::get()?.unix_timestamp;
+    touch_asset_funding(asset, now)?;
+    let funding_idx = funding_index_for_direction(asset, pos_direction);
+    let raw_funding = funding_fee_amount(pos_size, open_funding_index, funding_idx)?;
+    let funding_fee = raw_funding.min(pos_collateral);
+    let effective_collateral = pos_collateral.saturating_sub(funding_fee);
+
+    if funding_fee > 0 {
+        let bump = ctx.bumps.settlement_authority;
+        let bump_seed = [bump];
+        let signer_seeds: &[&[u8]] = &[SETTLEMENT_SEED, &bump_seed];
+        let signers: &[&[&[u8]]] = &[signer_seeds];
+        let cpi_accounts = Transfer {
+            from: ctx.accounts.core_collateral_token.to_account_info(),
+            to: ctx.accounts.vault_token_account.to_account_info(),
+            authority: ctx.accounts.settlement_authority.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info().key(),
+            cpi_accounts,
+            signers,
+        );
+        token::transfer(cpi_ctx, funding_fee)?;
+    }
     let (pos_direction, _pos_size, lp_remove) = (
         ctx.accounts.position.direction,
         ctx.accounts.position.size,
@@ -123,17 +157,16 @@ pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String, _tr
 
     // Settlement Calculation
     let (final_state, core_pay_trader, vault_pay_trader_profit, vault_collect_loss) =
-        calculate_settlement(&ctx.accounts.position, close_price)?;
+        calculate_settlement(&ctx.accounts.position, close_price, effective_collateral)?;
     
     // Internal state updates (OI / priced OI; LP risk totals set from need-lock simulation above)
     unwind_asset_open_interest(asset, &ctx.accounts.position)?;
     asset.lp_locked_long = new_rl;
     asset.lp_locked_short = new_rs;
     
-    let ts = Clock::get()?.unix_timestamp;
     let pm = &mut ctx.accounts.position;
     pm.close_price = close_price;
-    pm.close_time = ts;
+    pm.close_time = now;
     pm.state = final_state;
 
     let bump = ctx.bumps.settlement_authority;
@@ -195,6 +228,7 @@ pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String, _tr
 fn calculate_settlement(
     position: &Position,
     close_price: u64,
+    effective_collateral: u64,
 ) -> Result<(PositionState, u64, u64, u64)> {
     let pnl = signed_pnl(
         position.size,
@@ -204,13 +238,13 @@ fn calculate_settlement(
     )?;
 
     if pnl >= 0 {
-        // Profitable: core returns full collateral; vault pays profit.
+        // Profitable: core returns collateral after funding; vault pays profit.
         let profit = u64::try_from(pnl).map_err(|_| error!(CoreError::Overflow))?;
-        Ok((PositionState::Closed, position.collateral, profit, 0))
+        Ok((PositionState::Closed, effective_collateral, profit, 0))
     } else {
         let loss = u64::try_from(-pnl).map_err(|_| error!(CoreError::Overflow))?;
-        let collected = std::cmp::min(loss, position.collateral);
-        let rem = position.collateral.saturating_sub(collected);
+        let collected = std::cmp::min(loss, effective_collateral);
+        let rem = effective_collateral.saturating_sub(collected);
         Ok((PositionState::Closed, rem, 0, collected))
     }
 }
@@ -263,6 +297,8 @@ fn unwind_asset_open_interest(asset: &mut Account<'_, Asset>, position: &Positio
             .checked_sub(priced_oi)
             .ok_or(CoreError::InvariantViolation)?;
     }
+
+    sync_risk_from_oi(asset);
 
     Ok(())
 }

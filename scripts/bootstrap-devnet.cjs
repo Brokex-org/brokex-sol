@@ -232,6 +232,8 @@ async function main() {
       deploymentSigs.assets[assetId] = await coreProgram.methods
         .addAsset(assetId, desiredFeed, {
           commissionOpenBps: new anchor.BN(0),
+          baseFundingPerYear: new anchor.BN(10_000),
+          maxFundingPerYear: new anchor.BN(1_000_000),
           profitCapFp: new anchor.BN(0),
           alphaMinFp: new anchor.BN(0),
           alphaScale: new anchor.BN(0),

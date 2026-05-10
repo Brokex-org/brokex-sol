@@ -24,9 +24,16 @@ on:
           - rust
           - typescript
 
+# One runner installs the toolchain and runs build + tests in order. Split jobs do not
+# share PATH, caches of binaries, or target/deploy/*.so, which caused "anchor: command
+# not found", missing cargo build-sbf, and LiteSVM tests failing without brokex_core.so.
+
+env:
+  ANCHOR_VERSION: "1.0.1"
+
 jobs:
-  setup:
-    name: Setup Environment
+  ci:
+    name: Build and test
     runs-on: ubuntu-latest
 
     steps:
@@ -41,18 +48,21 @@ jobs:
         with:
           workspaces: . -> target
 
-      - name: Install Solana CLI
+      - name: Install Solana CLI (provides cargo build-sbf)
         run: |
           sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
-          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
 
       - name: Install Anchor CLI via AVM
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: |
           cargo install --git https://github.com/solana-foundation/anchor avm --locked --force
-          avm install latest
-          avm use latest
+          echo "$HOME/.avm/bin" >> "$GITHUB_PATH"
+          avm install "$ANCHOR_VERSION"
+          avm use "$ANCHOR_VERSION"
+          anchor --version
+          solana --version
 
       - name: Install Node dependencies
         run: yarn install
@@ -60,75 +70,26 @@ jobs:
       - name: Stage program deploy keypairs
         run: yarn prep:program-keys
 
-      - name: Set Solana cluster to devnet
-        run: solana config set --url devnet
+      - name: Create wallet for Anchor config
+        run: |
+          mkdir -p keys
+          solana-keygen new --no-bip39-passphrase --force --outfile keys/devnet-admin.json
 
-      - name: Create CI provider wallet
-        run: solana-keygen new --no-bip39-passphrase --force --outfile keys/devnet-admin.json
-
-  build:
-    name: Build Anchor Programs
-    runs-on: ubuntu-latest
-    needs: setup
-    if: |
-      github.event_name != 'workflow_dispatch' ||
-      github.event.inputs.test_suite == 'all' ||
-      github.event.inputs.test_suite == 'build-only'
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-
-      - name: Build Anchor programs
+      - name: Anchor build
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'all' || github.event.inputs.test_suite == 'build-only' || github.event.inputs.test_suite == 'rust' }}
         run: anchor build
 
-  rust-tests:
-    name: Rust Tests
-    runs-on: ubuntu-latest
-    needs: setup
-    if: |
-      github.event_name != 'workflow_dispatch' ||
-      github.event.inputs.test_suite == 'all' ||
-      github.event.inputs.test_suite == 'rust'
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-
-      - name: Run Rust tests
+      - name: Rust tests (includes LiteSVM — needs target/deploy/*.so)
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'all' || github.event.inputs.test_suite == 'rust' }}
         run: cargo test --workspace --features litesvm-integration -- --nocapture
 
-  typescript-tests:
-    name: TypeScript Lifecycle Tests
-    runs-on: ubuntu-latest
-    needs: setup
-    if: |
-      github.event_name != 'workflow_dispatch' ||
-      github.event.inputs.test_suite == 'all' ||
-      github.event.inputs.test_suite == 'typescript'
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-
-      - name: Run TypeScript lifecycle tests
+      - name: TypeScript lifecycle tests
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'all' || github.event.inputs.test_suite == 'typescript' }}
         run: yarn test:lifecycle
 
-  summary:
-    name: CI Summary
-    runs-on: ubuntu-latest
-    needs:
-      - setup
-      - build
-      - rust-tests
-      - typescript-tests
-    if: always()
-
-    steps:
-      - name: Generate summary
+      - name: CI summary
+        if: always()
         run: |
-          echo "## Anchor CI Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- Setup completed" >> $GITHUB_STEP_SUMMARY
-          echo "- Build job evaluated" >> $GITHUB_STEP_SUMMARY
-          echo "- Rust tests evaluated" >> $GITHUB_STEP_SUMMARY
-          echo "- TypeScript tests evaluated" >> $GITHUB_STEP_SUMMARY
+          echo "## Anchor CI" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Anchor ${ANCHOR_VERSION}, Solana and AVM on PATH for this job" >> "$GITHUB_STEP_SUMMARY"
+          echo "- LiteSVM tests run after \`anchor build\` so program artifacts exist" >> "$GITHUB_STEP_SUMMARY"

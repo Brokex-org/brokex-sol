@@ -48,4 +48,6 @@ pub enum CoreError {
     InvalidReferencePrice,
     #[msg("Invalid batch input")]
     InvalidBatchInput,
+    #[msg("Invalid funding config (e.g. max funding too low vs base)")]
+    InvalidFundingConfig,
 }

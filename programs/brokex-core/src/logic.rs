@@ -75,6 +75,8 @@ pub fn funding_rates_annual(asset: &Asset) -> Result<(u64, u64)> {
 }
 
 pub fn touch_asset_funding(asset: &mut Asset, now: i64) -> Result<()> {
+    // First touch after asset init: establish the funding clock only. No accrual yet — there is
+    // no prior timestamp, so Δt would be undefined; accrual starts on the next call.
     if asset.last_funding_update == 0 {
         asset.last_funding_update = now;
         return Ok(());
@@ -115,7 +117,11 @@ pub fn funding_index_for_direction(asset: &Asset, direction: PositionDirection) 
 }
 
 pub fn funding_fee_amount(oi: u64, open_index: u128, current_index: u128) -> Result<u64> {
-    let delta = current_index.saturating_sub(open_index);
+    require!(
+        current_index >= open_index,
+        CoreError::InvariantViolation
+    );
+    let delta = current_index - open_index;
     let fee_u128 = (oi as u128)
         .saturating_mul(delta)
         .checked_div(PRECISION)
@@ -234,5 +240,11 @@ mod funding_tests {
     fn funding_fee_scales_with_index_delta_and_precision() {
         let fee = funding_fee_amount(2_000_000, 0, 10_000).unwrap();
         assert_eq!(fee, 20_000);
+    }
+
+    #[test]
+    fn funding_fee_rejects_index_going_backwards() {
+        let err = funding_fee_amount(1_000, 100, 99).unwrap_err();
+        assert_eq!(err, anchor_lang::error::Error::from(CoreError::InvariantViolation));
     }
 }

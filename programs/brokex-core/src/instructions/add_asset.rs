@@ -50,8 +50,18 @@ pub fn add_asset_handler(
 
     // Initialize config
     asset.commission_open_bps = config_input.commission_open_bps;
-    asset.base_funding_per_year = config_input.base_funding_per_year;
-    asset.max_funding_per_year = config_input.max_funding_per_year;
+    let base = config_input.base_funding_per_year;
+    let max = config_input.max_funding_per_year;
+    // Loose sanity: dominant-side cap should not be orders of magnitude below baseline (misconfig).
+    // Integer form of max >= base/2: 2*max >= base when base > 0.
+    if base > 0 {
+        require!(
+            max.saturating_mul(2) >= base,
+            CoreError::InvalidFundingConfig
+        );
+    }
+    asset.base_funding_per_year = base;
+    asset.max_funding_per_year = max;
 
     // Initialize state
     asset.oi_long = 0;

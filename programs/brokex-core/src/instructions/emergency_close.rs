@@ -5,6 +5,7 @@ use brokex_vault::VaultState;
 
 use crate::constants::*;
 use crate::error::CoreError;
+use crate::logic::{sync_risk_from_oi, touch_asset_funding};
 use crate::logic::capital_delta_close_remove_side;
 use crate::state::*;
 
@@ -87,6 +88,9 @@ pub fn emergency_close_handler(ctx: Context<EmergencyClose>, asset_id: String, _
     let mut delta_unlocked = 0u64;
 
     if ctx.accounts.position.state == PositionState::Open {
+        let now = Clock::get()?.unix_timestamp;
+        touch_asset_funding(asset, now)?;
+
         let contrib = ctx.accounts.position.lp_locked_capital;
         let (new_rl, new_rs, du) = capital_delta_close_remove_side(
             asset.lp_locked_long,
@@ -98,7 +102,6 @@ pub fn emergency_close_handler(ctx: Context<EmergencyClose>, asset_id: String, _
         )?;
         delta_unlocked = du;
 
-        // Unwind Asset state (OI / priced OI only)
         if pos_direction == PositionDirection::Long {
             asset.oi_long = asset.oi_long.checked_sub(pos_size).ok_or(CoreError::InvariantViolation)?;
             asset.sum_priced_oi_long = asset
@@ -114,6 +117,7 @@ pub fn emergency_close_handler(ctx: Context<EmergencyClose>, asset_id: String, _
         }
         asset.lp_locked_long = new_rl;
         asset.lp_locked_short = new_rs;
+        sync_risk_from_oi(asset);
     }
 
     // Update Position

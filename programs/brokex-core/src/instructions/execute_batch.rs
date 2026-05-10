@@ -6,7 +6,8 @@ use crate::oracle;
 use crate::error::CoreError;
 use crate::logic::{
     calculate_liquidation_price, capital_delta_close_remove_side, capital_delta_open_add_side,
-    execution_price_with_spread, trade_lp_locked_capital, validate_sl_tp,
+    execution_price_with_spread, funding_fee_amount, funding_index_for_direction, sync_risk_from_oi,
+    touch_asset_funding, trade_lp_locked_capital, validate_sl_tp,
 };
 use brokex_vault::cpi::{accounts::VaultSettle, settle};
 
@@ -246,6 +247,10 @@ fn execute_order_open<'info>(
     validate_sl_tp(execution_price, position.direction, position.sl_price, position.tp_price)?;
 
     let asset = &mut ctx.accounts.asset;
+    let ts = Clock::get()?.unix_timestamp;
+    touch_asset_funding(asset, ts)?;
+    position.open_funding_index = funding_index_for_direction(asset, position.direction);
+
     let collateral = position.collateral;
 
     let commission = collateral
@@ -303,6 +308,7 @@ fn execute_order_open<'info>(
         let priced_oi = (oi as u128).checked_mul(execution_price as u128).ok_or(CoreError::Overflow)?;
         asset.sum_priced_oi_short = asset.sum_priced_oi_short.checked_add(priced_oi).ok_or(CoreError::Overflow)?;
     }
+    sync_risk_from_oi(asset);
     asset.lp_locked_long = new_rl;
     asset.lp_locked_short = new_rs;
 
@@ -313,7 +319,7 @@ fn execute_order_open<'info>(
     position.lp_locked_capital = contrib;
     position.state = PositionState::Open;
     position.execution_status = ExecutionStatus::Executed;
-    position.open_time = Clock::get()?.unix_timestamp;
+    position.open_time = ts;
 
     let mut data = position_info.try_borrow_mut_data()?;
     let mut writer: &mut [u8] = &mut data[8..];
@@ -343,21 +349,51 @@ fn execute_order_close<'info>(
         oi_short,
     )?;
 
+    let oi = position.size;
+    let open_idx = position.open_funding_index;
+    let col = position.collateral;
+
+    let asset = &mut ctx.accounts.asset;
+    let now = Clock::get()?.unix_timestamp;
+    touch_asset_funding(asset, now)?;
+    let cur_idx = funding_index_for_direction(asset, position.direction);
+    let raw_funding = funding_fee_amount(oi, open_idx, cur_idx)?;
+    let funding_fee = raw_funding.min(col);
+    let effective_collateral = col.saturating_sub(funding_fee);
+
+    let bump = ctx.bumps.settlement_authority;
+    let bump_seed = [bump];
+    let signer_seeds: &[&[u8]] = &[SETTLEMENT_SEED, &bump_seed];
+    let signers: &[&[&[u8]]] = &[signer_seeds];
+
+    if funding_fee > 0 {
+        let cpi_accounts = Transfer {
+            from: ctx.accounts.core_collateral_token.to_account_info(),
+            to: ctx.accounts.vault_token_account.to_account_info(),
+            authority: ctx.accounts.settlement_authority.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info().key(),
+            cpi_accounts,
+            signers,
+        );
+        token::transfer(cpi_ctx, funding_fee)?;
+    }
+
     let pnl = signed_pnl(position.size, position.entry_price, execution_price, position.direction)?;
 
     let (vault_pay_trader_profit, vault_collect_loss, core_pay_trader) = if is_liquidation {
-        (0, position.collateral, 0)
+        (0, effective_collateral, 0)
     } else if pnl >= 0 {
         let profit = u64::try_from(pnl).map_err(|_| CoreError::Overflow)?;
-        (profit, 0, position.collateral)
+        (profit, 0, effective_collateral)
     } else {
         let loss = u64::try_from(-pnl).map_err(|_| CoreError::Overflow)?;
-        let collected = std::cmp::min(loss, position.collateral);
-        let rem = position.collateral.saturating_sub(collected);
+        let collected = std::cmp::min(loss, effective_collateral);
+        let rem = effective_collateral.saturating_sub(collected);
         (0, collected, rem)
     };
 
-    let asset = &mut ctx.accounts.asset;
     let contrib = position.lp_locked_capital;
     let (new_rl, new_rs, delta_unlocked) = capital_delta_close_remove_side(
         asset.lp_locked_long,
@@ -367,11 +403,6 @@ fn execute_order_close<'info>(
         asset.alpha_min_fp,
         asset.alpha_scale,
     )?;
-
-    let bump = ctx.bumps.settlement_authority;
-    let bump_seed = [bump];
-    let signer_seeds: &[&[u8]] = &[SETTLEMENT_SEED, &bump_seed];
-    let signers: &[&[&[u8]]] = &[signer_seeds];
 
     if delta_unlocked > 0 {
         let cpi_accounts = brokex_vault::cpi::accounts::UpdateLockedCapital {
@@ -427,6 +458,7 @@ fn execute_order_close<'info>(
     }
     asset.lp_locked_long = new_rl;
     asset.lp_locked_short = new_rs;
+    sync_risk_from_oi(asset);
 
     position.state = if is_liquidation {
         PositionState::Liquidated

@@ -48,6 +48,8 @@ describe("brokex-core", () => {
   const configInput = {
     commissionOpenBps: new anchor.BN(10),
     baseSpreadBps: new anchor.BN(0),
+    baseFundingPerYear: new anchor.BN(10_000),
+    maxFundingPerYear: new anchor.BN(1_000_000),
     profitCapFp: new anchor.BN(0),
     alphaMinFp: new anchor.BN(0),
     alphaScale: new anchor.BN(0),

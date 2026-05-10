@@ -99,6 +99,7 @@ pub fn open_position_handler(
 ) -> Result<()> {
     let position_id = ctx.accounts.config.next_position_id;
     let asset = &mut ctx.accounts.asset;
+    let liq_threshold_bps = asset.liquidation_threshold_bps;
 
     // Basic Validations
     require!(leverage > 0, CoreError::Overflow);
@@ -249,7 +250,7 @@ pub fn open_position_handler(
     position.sl_price = sl_price;
     position.tp_price = tp_price;
     position.liquidation_price = if is_market {
-        calculate_liquidation_price(actual_entry_price, leverage, direction)?
+        calculate_liquidation_price(actual_entry_price, leverage, liq_threshold_bps, direction)?
     } else {
         validate_sl_tp(target_price, direction, sl_price, tp_price)?;
         0

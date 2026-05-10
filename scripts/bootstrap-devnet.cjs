@@ -233,6 +233,7 @@ async function main() {
         .addAsset(assetId, desiredFeed, {
           commissionOpenBps: new anchor.BN(0),
           baseSpreadBps: new anchor.BN(0),
+          liquidationThresholdBps: new anchor.BN(10_000),
           baseFundingPerYear: new anchor.BN(10_000),
           maxFundingPerYear: new anchor.BN(1_000_000),
           profitCapFp: new anchor.BN(0),

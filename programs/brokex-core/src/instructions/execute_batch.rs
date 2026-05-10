@@ -231,9 +231,15 @@ fn execute_order_open<'info>(
     position_info: &AccountInfo<'info>,
     oracle_price: u64,
 ) -> Result<()> {
-    let (oi_long, oi_short, base_spread_bps, commission_open_bps) = {
+    let (oi_long, oi_short, base_spread_bps, commission_open_bps, liq_threshold_bps) = {
         let a = &ctx.accounts.asset;
-        (a.oi_long, a.oi_short, a.base_spread_bps, a.commission_open_bps)
+        (
+            a.oi_long,
+            a.oi_short,
+            a.base_spread_bps,
+            a.commission_open_bps,
+            a.liquidation_threshold_bps,
+        )
     };
     let execution_price = execution_price_with_spread(
         oracle_price,
@@ -315,7 +321,12 @@ fn execute_order_open<'info>(
     position.collateral = margin;
     position.size = oi;
     position.entry_price = execution_price;
-    position.liquidation_price = calculate_liquidation_price(execution_price, position.leverage, position.direction)?;
+    position.liquidation_price = calculate_liquidation_price(
+        execution_price,
+        position.leverage,
+        liq_threshold_bps,
+        position.direction,
+    )?;
     position.lp_locked_capital = contrib;
     position.state = PositionState::Open;
     position.execution_status = ExecutionStatus::Executed;

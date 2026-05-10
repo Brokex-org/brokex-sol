@@ -375,13 +375,26 @@ pub fn validate_sl_tp(reference_price: u64, direction: PositionDirection, sl_pri
     Ok(())
 }
 
-pub fn calculate_liquidation_price(entry_price: u64, leverage: u8, direction: PositionDirection) -> Result<u64> {
+/// `liquidation_threshold_bps` is validated in `add_asset_handler` (9000..=10000).
+pub fn calculate_liquidation_price(
+    entry_price: u64,
+    leverage: u8,
+    liquidation_threshold_bps: u64,
+    direction: PositionDirection,
+) -> Result<u64> {
     require!(entry_price > 0, CoreError::InvalidReferencePrice);
     require!(leverage > 0, CoreError::Overflow);
 
-    let move_amount = entry_price
-        .checked_div(leverage as u64)
+    // Single division: `move = entry * threshold / (10_000 * leverage)` avoids truncating by `10_000` first.
+    let denom = (10_000u128)
+        .checked_mul(leverage as u128)
         .ok_or(CoreError::Overflow)?;
+    let move_amount_u128 = (entry_price as u128)
+        .checked_mul(liquidation_threshold_bps as u128)
+        .ok_or(CoreError::Overflow)?
+        .checked_div(denom)
+        .ok_or(CoreError::Overflow)?;
+    let move_amount = u64::try_from(move_amount_u128).map_err(|_| error!(CoreError::Overflow))?;
 
     let liq_price = match direction {
         PositionDirection::Long => entry_price.saturating_sub(move_amount),
@@ -404,6 +417,7 @@ mod funding_tests {
             is_enabled: true,
             commission_open_bps: 0,
             base_spread_bps: 0,
+            liquidation_threshold_bps: 10_000,
             base_funding_per_year: base,
             max_funding_per_year: max,
             profit_cap_fp: DEFAULT_PROFIT_CAP_FP,
@@ -607,5 +621,26 @@ mod tests {
         let old_n = need_lock(rl, rs, alpha_min, scale).unwrap();
         let new_n = need_lock(rl - contrib, rs, alpha_min, scale).unwrap();
         assert_eq!(du, old_n.saturating_sub(new_n));
+    }
+
+    #[test]
+    fn liquidation_threshold_affects_move_amount_long() {
+        let entry = 1_000_000u64;
+        let lev = 10u8;
+        let liq_100 = calculate_liquidation_price(entry, lev, 10_000, PositionDirection::Long).unwrap();
+        let liq_90 = calculate_liquidation_price(entry, lev, 9_000, PositionDirection::Long).unwrap();
+        assert!(liq_90 > liq_100, "90% threshold should liquidate earlier for longs");
+    }
+
+    #[test]
+    fn liquidation_threshold_affects_move_amount_short() {
+        let entry = 1_000_000u64;
+        let lev = 10u8;
+        let liq_100 = calculate_liquidation_price(entry, lev, 10_000, PositionDirection::Short).unwrap();
+        let liq_90 = calculate_liquidation_price(entry, lev, 9_000, PositionDirection::Short).unwrap();
+        assert!(
+            liq_90 < liq_100,
+            "lower threshold should yield lower short liq price (earlier liquidation on adverse move)"
+        );
     }
 }

@@ -15,6 +15,7 @@ pub fn trade_lp_locked_capital(oi: u64, profit_cap_fp: u64) -> Result<u64> {
     let prod = (oi as u128)
         .checked_mul(profit_cap_fp as u128)
         .ok_or(CoreError::Overflow)?;
+    // Truncates toward zero vs exact fixed-point oi * cap / PRECISION (slightly under-books risk).
     let q = prod / PRECISION;
     u64::try_from(q).map_err(|_| error!(CoreError::Overflow))
 }
@@ -178,6 +179,8 @@ pub fn calculate_liquidation_price(entry_price: u64, leverage: u8, direction: Po
     Ok(liq_price)
 }
 
+// Vault `total_locked_capital` CPI alignment with core is exercised in `tests/brokex-core-lifecycle.ts`
+// (`keeps vault total_locked_capital in sync through openPosition and closePosition`).
 #[cfg(test)]
 mod tests {
     use super::*;

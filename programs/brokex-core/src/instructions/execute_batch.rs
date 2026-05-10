@@ -5,10 +5,9 @@ use crate::constants::*;
 use crate::oracle;
 use crate::error::CoreError;
 use crate::logic::{
-    calculate_liquidation_price, funding_fee_amount, funding_index_for_direction, sync_risk_from_oi,
-    touch_asset_funding, validate_sl_tp,
-    capital_delta_open_add_side,
-    capital_delta_close_remove_side, trade_lp_locked_capital,
+    calculate_liquidation_price, capital_delta_close_remove_side, capital_delta_open_add_side,
+    execution_price_with_spread, funding_fee_amount, funding_index_for_direction, sync_risk_from_oi,
+    touch_asset_funding, trade_lp_locked_capital, validate_sl_tp,
 };
 use brokex_vault::cpi::{accounts::VaultSettle, settle};
 
@@ -230,8 +229,21 @@ fn execute_order_open<'info>(
     ctx: &mut Context<'info, ExecuteBatch<'info>>,
     position: &mut Position,
     position_info: &AccountInfo<'info>,
-    execution_price: u64,
+    oracle_price: u64,
 ) -> Result<()> {
+    let (oi_long, oi_short, base_spread_bps, commission_open_bps) = {
+        let a = &ctx.accounts.asset;
+        (a.oi_long, a.oi_short, a.base_spread_bps, a.commission_open_bps)
+    };
+    let execution_price = execution_price_with_spread(
+        oracle_price,
+        base_spread_bps,
+        position.direction,
+        false,
+        oi_long,
+        oi_short,
+    )?;
+
     validate_sl_tp(execution_price, position.direction, position.sl_price, position.tp_price)?;
 
     let asset = &mut ctx.accounts.asset;
@@ -242,7 +254,7 @@ fn execute_order_open<'info>(
     let collateral = position.collateral;
 
     let commission = collateral
-        .checked_mul(asset.commission_open_bps)
+        .checked_mul(commission_open_bps)
         .ok_or(CoreError::Overflow)?
         / 10_000;
 
@@ -321,18 +333,30 @@ fn execute_order_close<'info>(
     position: &mut Position,
     position_info: &AccountInfo<'info>,
     trader_token_account: &AccountInfo<'info>,
-    execution_price: u64,
+    oracle_price: u64,
     is_liquidation: bool,
 ) -> Result<()> {
+    let (oi_long, oi_short, base_spread_bps) = {
+        let a = &ctx.accounts.asset;
+        (a.oi_long, a.oi_short, a.base_spread_bps)
+    };
+    let execution_price = execution_price_with_spread(
+        oracle_price,
+        base_spread_bps,
+        position.direction,
+        true,
+        oi_long,
+        oi_short,
+    )?;
+
     let oi = position.size;
     let open_idx = position.open_funding_index;
     let col = position.collateral;
-    let dir = position.direction;
 
     let asset = &mut ctx.accounts.asset;
     let now = Clock::get()?.unix_timestamp;
     touch_asset_funding(asset, now)?;
-    let cur_idx = funding_index_for_direction(asset, dir);
+    let cur_idx = funding_index_for_direction(asset, position.direction);
     let raw_funding = funding_fee_amount(oi, open_idx, cur_idx)?;
     let funding_fee = raw_funding.min(col);
     let effective_collateral = col.saturating_sub(funding_fee);

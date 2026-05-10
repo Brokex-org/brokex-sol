@@ -25,6 +25,8 @@ pub struct Asset {
     pub commission_open_bps: u64,
     /// Base spread as bps of oracle price; dynamic skew scales effective spread (see `logic::execution_price_with_spread`).
     pub base_spread_bps: u64,
+    /// Liquidation threshold in bps [9000..=10000] (Extended MVP §15).
+    pub liquidation_threshold_bps: u64,
     /// Annual funding index increment at a balanced book (`index += rate * dt / YEAR`; fee = OI * Δindex / PRECISION).
     pub base_funding_per_year: u64,
     pub max_funding_per_year: u64,

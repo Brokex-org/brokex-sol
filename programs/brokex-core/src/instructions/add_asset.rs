@@ -11,6 +11,8 @@ pub struct AssetConfigInput {
     pub commission_open_bps: u64,
     /// Base spread as bps of oracle price (`0` allowed — no spread).
     pub base_spread_bps: u64,
+    /// Liquidation threshold in bps [9000..=10000] (Extended MVP §15).
+    pub liquidation_threshold_bps: u64,
     pub base_funding_per_year: u64,
     pub max_funding_per_year: u64,
     /// Fixed-point on [`crate::logic::PRECISION`]; `0` uses [`DEFAULT_PROFIT_CAP_FP`] (full-OI risk).
@@ -62,6 +64,11 @@ pub fn add_asset_handler(
     // Initialize config
     asset.commission_open_bps = config_input.commission_open_bps;
     asset.base_spread_bps = config_input.base_spread_bps;
+    require!(
+        (9000..=10000).contains(&config_input.liquidation_threshold_bps),
+        CoreError::InvalidLiquidationThreshold
+    );
+    asset.liquidation_threshold_bps = config_input.liquidation_threshold_bps;
     let base = config_input.base_funding_per_year;
     let max = config_input.max_funding_per_year;
     // Loose sanity: dominant-side cap should not be orders of magnitude below baseline (misconfig).

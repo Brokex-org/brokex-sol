@@ -50,6 +50,8 @@ pub enum CoreError {
     InvalidBatchInput,
     #[msg("Invalid funding config (e.g. max funding too low vs base)")]
     InvalidFundingConfig,
+    #[msg("Invalid liquidation threshold (must be between 9000 and 10000 bps)")]
+    InvalidLiquidationThreshold,
     #[msg("Invalid capital locking parameters")]
     InvalidCapitalParams,
 }

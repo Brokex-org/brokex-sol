@@ -371,11 +371,24 @@ pub fn validate_sl_tp(reference_price: u64, direction: PositionDirection, sl_pri
     Ok(())
 }
 
-pub fn calculate_liquidation_price(entry_price: u64, leverage: u8, direction: PositionDirection) -> Result<u64> {
+pub fn calculate_liquidation_price(
+    entry_price: u64,
+    leverage: u8,
+    liquidation_threshold_bps: u64,
+    direction: PositionDirection,
+) -> Result<u64> {
     require!(entry_price > 0, CoreError::InvalidReferencePrice);
     require!(leverage > 0, CoreError::Overflow);
+    require!(
+        (9000..=10000).contains(&liquidation_threshold_bps),
+        CoreError::InvalidLiquidationThreshold
+    );
 
     let move_amount = entry_price
+        .checked_mul(liquidation_threshold_bps)
+        .ok_or(CoreError::Overflow)?
+        .checked_div(10_000)
+        .ok_or(CoreError::Overflow)?
         .checked_div(leverage as u64)
         .ok_or(CoreError::Overflow)?;
 
@@ -400,6 +413,7 @@ mod funding_tests {
             is_enabled: true,
             commission_open_bps: 0,
             base_spread_bps: 0,
+            liquidation_threshold_bps: 10_000,
             base_funding_per_year: base,
             max_funding_per_year: max,
             profit_cap_fp: DEFAULT_PROFIT_CAP_FP,
@@ -572,5 +586,14 @@ mod tests {
         let old_n = need_lock(rl, rs, alpha_min, scale).unwrap();
         let new_n = need_lock(rl - contrib, rs, alpha_min, scale).unwrap();
         assert_eq!(du, old_n.saturating_sub(new_n));
+    }
+
+    #[test]
+    fn liquidation_threshold_affects_move_amount() {
+        let entry = 1_000_000u64;
+        let lev = 10u8;
+        let liq_100 = calculate_liquidation_price(entry, lev, 10_000, PositionDirection::Long).unwrap();
+        let liq_90 = calculate_liquidation_price(entry, lev, 9_000, PositionDirection::Long).unwrap();
+        assert!(liq_90 > liq_100, "90% threshold should liquidate earlier for longs");
     }
 }

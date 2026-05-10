@@ -461,9 +461,11 @@ If an asset is disabled (delisted):
 
 ---
 
-## **11. Priority Scope (What NOT to Implement Yet)**
+## **11. Priority Scope (What NOT to Implement Yet)** — **OUTDATED**
 
-At this stage, DO NOT implement:
+> **Status:** See **`Extended_MVP.md`** for the authoritative spec. This subsection’s **deferral list is obsolete**; priorities have moved on (e.g. funding, keepers, and other features may be in scope when specified). Do **not** use the bullet list below to block current work.
+
+**Original deferral list (historical only):**
 
 * spread,
 * alpha / K risk models,
@@ -473,9 +475,9 @@ At this stage, DO NOT implement:
 * stop loss / take profit,
 * keepers or automation.
 
-The only goal is:
+**Enduring goal (still applies):**
 
-**correct accounting + correct settlement + correct capital management**
+**correct accounting + correct settlement + correct capital management** — any new feature must preserve these invariants.
 
 ---
 
@@ -504,4 +506,4 @@ The system must guarantee:
 * one-time commission at opening,
 * safe emergency exit mechanism.
 
-No advanced trading logic is required at this stage. Only correctness and consistency matter.
+Correctness and consistency remain mandatory; advanced trading logic is in scope when explicitly specified (see §11 — outdated deferral list).

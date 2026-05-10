@@ -1,0 +1,73 @@
+{
+  "generatedAt": "2026-05-08T23:48:49.554Z",
+  "cluster": "devnet",
+  "rpc": "https://api.devnet.solana.com",
+  "wallet": {
+    "admin": "6rDkMCzoWsdLknZJPxzKxGsZ2jDooBvNRQpPZp2kFGBn"
+  },
+  "programs": {
+    "core": "2D2SpgCJqZquV5DD1jrXWL6cmuqoxFgsNjihkt9BUdNB",
+    "vault": "6bo6uqoj77cHBMYg9FCbKYGc3iUzNW62RLK7Xmzqawk8"
+  },
+  "mint": {
+    "usdc": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
+  },
+  "accounts": {
+    "configPda": "Ad84sWZG8Xbft9UeHA6BR3HnZpCCDAn55FNjNoSpb99f",
+    "vaultStatePda": "FRu6greAuZBkmWvxpu1uF3Fb9pYPT2jyGAJNHp5vQo8e",
+    "vaultTokenAta": "BDjbt8c2iL3HaMckMRBxQ2xCbpxi5iL3jLxyCD13PXew",
+    "settlementAuthorityPda": "DABcJBFnfDgUMzp6kMp7Sa83zphQXvFVmXkL7fMjMNGt",
+    "coreCollateralAta": "4hsM6cSZxhsQaJKFSy6zd7RV2dbybUPzCXc73ARPn1pD",
+    "adminUsdcAta": "F8XBD5x3KkVtAjeFGjsmC9jbJwJFectHtm2cVpKAGz5H"
+  },
+  "assets": [
+    {
+      "id": "BTC/USD",
+      "assetPda": "HwWcL1ac49gW2NYSTs2SwyKZjAiTMkwHEQGUWnmLDoZx",
+      "pythFeedHex": "e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
+      "pythFeedPubkey": "GVXRSBjFk6e6J3NbVPXohDJetcTjaeeuykUpbQF8UoMU"
+    },
+    {
+      "id": "ETH/USD",
+      "assetPda": "F6yM6WMw2oC4fHt3tmRarFaDc83PbyQRaSY1bo12PQ9B",
+      "pythFeedHex": "ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
+      "pythFeedPubkey": "JBu1AL4obBcCMqKBBxhpWCNUt136ijcuMZLFvTP7iWdB"
+    },
+    {
+      "id": "SOL/USD",
+      "assetPda": "6zQYrZyXJs8oSemSNDsCcWxw4SJfyTk6SXsgS4JUiXWz",
+      "pythFeedHex": "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d",
+      "pythFeedPubkey": "H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG"
+    },
+    {
+      "id": "EUR/USD",
+      "assetPda": "9LncpED1H92mRsmq7XPi7Vp2hZcZccPv2MTMz7h5Xaes",
+      "pythFeedHex": "a995d00bb36a63cef7fd2c287dc105fc8f3d93779f062f09551b0af3e81ec30b",
+      "pythFeedPubkey": "CQzPyC5xVhkuBfWFJiPCvPEnBshmRium4xxUxnX1ober"
+    },
+    {
+      "id": "XAU/USD",
+      "assetPda": "3c8mrVPBbLH6QqdN1beG3vLKwhYKvyia89LK2UMoDnG6",
+      "pythFeedHex": "765d2ba906dbc32ca17cc11f5310a89e9ee1f6420508c63861f2f8ba4ee34bb2",
+      "pythFeedPubkey": "8y3WWjvmSmVGWVKH1rCA7VTRmuU7QbJ9axafSsBX5FcD"
+    }
+  ],
+  "balances": {
+    "requestedDepositUsdc": 20,
+    "requestedDepositRaw": "20000000",
+    "adminUsdcRaw": "0",
+    "adminUsdc": "0",
+    "vaultUsdcRaw": "80000000",
+    "vaultUsdc": "80",
+    "vaultLockedRaw": "0",
+    "vaultLockedUsdc": "0",
+    "vaultFreeRaw": "80000000",
+    "vaultFreeUsdc": "80"
+  },
+  "signatures": {
+    "vaultInitialize": null,
+    "protocolInitialize": null,
+    "assets": {},
+    "deposit": "2PrTYEUiKc4esEb8kKvUfkZepndXLD1aNgxiGuLJkPoWEKaxacxczMgue1RYmTxg2rZ2Rtmr4xQgpnrRQz1y3QQB"
+  }
+}

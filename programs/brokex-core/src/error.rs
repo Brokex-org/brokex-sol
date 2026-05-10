@@ -52,4 +52,12 @@ pub enum CoreError {
     InvalidFundingConfig,
     #[msg("Invalid capital locking parameters")]
     InvalidCapitalParams,
+    #[msg("Invalid add/remove margin amount")]
+    InvalidMarginAmount,
+    #[msg("Insufficient margin after funding payment for this removal")]
+    InsufficientMarginAfterFunding,
+    #[msg("Partial close would leave open interest with no margin")]
+    PartialCloseUndercollateralized,
+    #[msg("Oracle mark is at or past liquidation after this margin removal")]
+    PositionUnhealthyAfterMarginRemoval,
 }

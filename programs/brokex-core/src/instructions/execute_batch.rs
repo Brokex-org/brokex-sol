@@ -303,7 +303,8 @@ fn execute_order_open<'info>(
     position.collateral = margin;
     position.size = oi;
     position.entry_price = execution_price;
-    position.liquidation_price = calculate_liquidation_price(execution_price, position.leverage, position.direction)?;
+    position.liquidation_price =
+        calculate_liquidation_price(execution_price, oi, margin, position.direction)?;
     position.lp_locked_capital = contrib;
     position.state = PositionState::Open;
     position.execution_status = ExecutionStatus::Executed;

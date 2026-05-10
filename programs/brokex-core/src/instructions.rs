@@ -10,6 +10,8 @@ pub mod emergency_close;
 pub mod cancel_order;
 pub mod update_sl_tp;
 pub mod execute_batch;
+pub mod add_margin;
+pub mod remove_margin;
 
 pub use initialize_protocol::*;
 pub use add_asset::*;
@@ -23,3 +25,5 @@ pub use emergency_close::*;
 pub use cancel_order::*;
 pub use update_sl_tp::*;
 pub use execute_batch::*;
+pub use add_margin::*;
+pub use remove_margin::*;

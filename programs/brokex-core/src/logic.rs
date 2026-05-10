@@ -289,17 +289,27 @@ pub fn validate_sl_tp(reference_price: u64, direction: PositionDirection, sl_pri
     Ok(())
 }
 
-pub fn calculate_liquidation_price(entry_price: u64, leverage: u8, direction: PositionDirection) -> Result<u64> {
+/// Liquidation threshold 100%: `move = entryPrice * collateral / positionSize` (same as `entry/leverage` at open when `size = margin * leverage`).
+pub fn calculate_liquidation_price(
+    entry_price: u64,
+    position_size: u64,
+    collateral: u64,
+    direction: PositionDirection,
+) -> Result<u64> {
     require!(entry_price > 0, CoreError::InvalidReferencePrice);
-    require!(leverage > 0, CoreError::Overflow);
+    require!(collateral > 0, CoreError::Overflow);
+    require!(position_size > 0, CoreError::Overflow);
 
-    let move_amount = entry_price
-        .checked_div(leverage as u64)
+    let move_amount = (entry_price as u128)
+        .checked_mul(collateral as u128)
+        .ok_or(CoreError::Overflow)?
+        .checked_div(position_size as u128)
         .ok_or(CoreError::Overflow)?;
+    let move_u64 = u64::try_from(move_amount).map_err(|_| error!(CoreError::Overflow))?;
 
     let liq_price = match direction {
-        PositionDirection::Long => entry_price.saturating_sub(move_amount),
-        PositionDirection::Short => entry_price.checked_add(move_amount).ok_or(CoreError::Overflow)?,
+        PositionDirection::Long => entry_price.saturating_sub(move_u64),
+        PositionDirection::Short => entry_price.checked_add(move_u64).ok_or(CoreError::Overflow)?,
     };
 
     Ok(liq_price)

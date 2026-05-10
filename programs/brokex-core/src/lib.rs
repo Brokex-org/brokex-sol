@@ -127,4 +127,22 @@ pub mod brokex_core {
     ) -> Result<()> {
         instructions::execute_batch_handler(ctx, asset_id, trade_ids, action_types)
     }
+
+    pub fn add_margin(
+        ctx: Context<AddMargin>,
+        asset_id: String,
+        trade_id: u64,
+        amount: u64,
+    ) -> Result<()> {
+        instructions::add_margin_handler(ctx, asset_id, trade_id, amount)
+    }
+
+    pub fn remove_margin(
+        ctx: Context<RemoveMargin>,
+        asset_id: String,
+        trade_id: u64,
+        amount: u64,
+    ) -> Result<()> {
+        instructions::remove_margin_handler(ctx, asset_id, trade_id, amount)
+    }
 }

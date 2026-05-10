@@ -384,13 +384,14 @@ pub fn calculate_liquidation_price(
         CoreError::InvalidLiquidationThreshold
     );
 
-    let move_amount = entry_price
-        .checked_mul(liquidation_threshold_bps)
+    let move_amount_u128 = (entry_price as u128)
+        .checked_mul(liquidation_threshold_bps as u128)
         .ok_or(CoreError::Overflow)?
         .checked_div(10_000)
         .ok_or(CoreError::Overflow)?
-        .checked_div(leverage as u64)
+        .checked_div(leverage as u128)
         .ok_or(CoreError::Overflow)?;
+    let move_amount = u64::try_from(move_amount_u128).map_err(|_| error!(CoreError::Overflow))?;
 
     let liq_price = match direction {
         PositionDirection::Long => entry_price.saturating_sub(move_amount),

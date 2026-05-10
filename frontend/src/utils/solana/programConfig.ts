@@ -3,8 +3,8 @@ import { PublicKey } from '@solana/web3.js';
 export type SolanaCluster = 'devnet' | 'testnet' | 'mainnet';
 
 const DEFAULT_RPC = 'https://api.devnet.solana.com';
-const DEFAULT_CORE_PROGRAM_ID = '7yRpue4276YpzxgF3bTTUfTTUbtVArjDYbbYxYBWV8Ys';
-const DEFAULT_VAULT_PROGRAM_ID = 'AePFV3TeyAkWMSR3YjE7ufkkwo1Mcsm4vUDSgvouqxUK';
+const DEFAULT_CORE_PROGRAM_ID = '2D2SpgCJqZquV5DD1jrXWL6cmuqoxFgsNjihkt9BUdNB';
+const DEFAULT_VAULT_PROGRAM_ID = '6bo6uqoj77cHBMYg9FCbKYGc3iUzNW62RLK7Xmzqawk8';
 const DEFAULT_USDC_MINT = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
 
 function readEnv(key: string, fallback: string): string {

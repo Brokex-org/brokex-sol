@@ -11,7 +11,7 @@
  *
  * Env:
  *   ANCHOR_PROVIDER_URL  (default https://api.devnet.solana.com)
- *   ANCHOR_WALLET        (default keys/localnet-authority.json)
+ *   ANCHOR_WALLET        (default keys/devnet-admin.json)
  *   USDC_MINT            (default Circle devnet USDC)
  *   DEPOSIT_USDC         (default 1000 = 1000.0 USDC raw 1e6)
  *
@@ -86,6 +86,20 @@ function loadKeypair(keyPath) {
   return Keypair.fromSecretKey(Uint8Array.from(raw));
 }
 
+function writeJson(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function toBase58Map(values) {
+  return Object.fromEntries(
+    Object.entries(values).map(([key, value]) => [
+      key,
+      value instanceof PublicKey ? value.toBase58() : value,
+    ])
+  );
+}
+
 async function main() {
   const repoRoot = path.join(__dirname, "..");
   const idlCore = JSON.parse(
@@ -101,7 +115,7 @@ async function main() {
     ? process.env.ANCHOR_WALLET
     : path.join(
         repoRoot,
-        process.env.ANCHOR_WALLET || "keys/localnet-authority.json"
+        process.env.ANCHOR_WALLET || "keys/devnet-admin.json"
       );
 
   if (!fs.existsSync(walletPath)) {
@@ -138,6 +152,17 @@ async function main() {
     [SETTLEMENT_SEED],
     coreProgram.programId
   )[0];
+  const coreCollateralAta = getAssociatedTokenAddressSync(
+    usdcMint,
+    settlementAuthorityPda,
+    true
+  );
+  const deploymentSigs = {
+    vaultInitialize: null,
+    protocolInitialize: null,
+    assets: {},
+    deposit: null,
+  };
 
   const bal = await connection.getBalance(admin.publicKey);
   if (bal < 0.1 * anchor.web3.LAMPORTS_PER_SOL) {
@@ -151,7 +176,7 @@ async function main() {
 
   if (!(await connection.getAccountInfo(vaultStatePda))) {
     console.log("Initializing vault...");
-    await vaultProgram.methods
+    deploymentSigs.vaultInitialize = await vaultProgram.methods
       .initialize()
       .accounts({
         admin: admin.publicKey,
@@ -182,7 +207,7 @@ async function main() {
   if (!(await connection.getAccountInfo(configPda))) {
     console.log("Initializing brokex_core protocol...");
     // Third pubkey is vault *state* PDA (IDL field name is vault_program — Rust stores it as vault_state).
-    await coreProgram.methods
+    deploymentSigs.protocolInitialize = await coreProgram.methods
       .initializeProtocol(usdcMint, vaultTokenAta, vaultStatePda)
       .accounts({
         config: configPda,
@@ -204,8 +229,8 @@ async function main() {
     const existing = await connection.getAccountInfo(assetPda);
     if (!existing) {
       console.log(`Adding asset ${assetId} (feed ${desiredFeed.toBase58()})...`);
-      await coreProgram.methods
-        .addAsset(assetId, desiredFeed, { commissionOpenBps: new anchor.BN(0), baseSpreadBps: new anchor.BN(0) })
+      deploymentSigs.assets[assetId] = await coreProgram.methods
+        .addAsset(assetId, desiredFeed, { commissionOpenBps: new anchor.BN(0) })
         .accounts({
           asset: assetPda,
           config: configPda,
@@ -220,7 +245,7 @@ async function main() {
         console.log(
           `Updating ${assetId} pyth_feed: ${onChain.toBase58()} -> ${desiredFeed.toBase58()}`
         );
-        await coreProgram.methods
+        deploymentSigs.assets[assetId] = await coreProgram.methods
           .updateAssetPythFeed(desiredFeed)
           .accounts({
             asset: assetPda,
@@ -254,7 +279,7 @@ async function main() {
     );
   } else {
     console.log(`Depositing ${depositUi} USDC into vault...`);
-    await vaultProgram.methods
+    deploymentSigs.deposit = await vaultProgram.methods
       .deposit(depositRaw)
       .accounts({
         admin: admin.publicKey,
@@ -266,6 +291,64 @@ async function main() {
       .rpc();
     console.log("Deposit complete.");
   }
+
+  const vaultState = await vaultProgram.account.vaultState.fetch(vaultStatePda);
+  const vaultTokenBalance = await connection.getTokenAccountBalance(vaultTokenAta);
+  const adminTokenBalance = await connection.getTokenAccountBalance(adminAta);
+  const vaultRaw = BigInt(vaultTokenBalance.value.amount);
+  const lockedRaw = BigInt(vaultState.totalLockedCapital.toString());
+  const deployment = {
+    generatedAt: new Date().toISOString(),
+    cluster: "devnet",
+    rpc,
+    wallet: {
+      admin: admin.publicKey.toBase58(),
+    },
+    programs: toBase58Map({
+      core: coreProgram.programId,
+      vault: vaultProgram.programId,
+    }),
+    mint: {
+      usdc: usdcMint.toBase58(),
+    },
+    accounts: toBase58Map({
+      configPda,
+      vaultStatePda,
+      vaultTokenAta,
+      settlementAuthorityPda,
+      coreCollateralAta,
+      adminUsdcAta: adminAta,
+    }),
+    assets: ASSETS.map(({ id, feedHex }) => {
+      const [assetPda] = PublicKey.findProgramAddressSync(
+        [ASSET_SEED, Buffer.from(id)],
+        coreProgram.programId
+      );
+      return {
+        id,
+        assetPda: assetPda.toBase58(),
+        pythFeedHex: feedHex,
+        pythFeedPubkey: feedHexToPubkey(feedHex).toBase58(),
+      };
+    }),
+    balances: {
+      requestedDepositUsdc: depositUi,
+      requestedDepositRaw: depositRaw.toString(),
+      adminUsdcRaw: adminTokenBalance.value.amount,
+      adminUsdc: adminTokenBalance.value.uiAmountString,
+      vaultUsdcRaw: vaultTokenBalance.value.amount,
+      vaultUsdc: vaultTokenBalance.value.uiAmountString,
+      vaultLockedRaw: lockedRaw.toString(),
+      vaultLockedUsdc: (Number(lockedRaw) / 1_000_000).toString(),
+      vaultFreeRaw: (vaultRaw - lockedRaw).toString(),
+      vaultFreeUsdc: (Number(vaultRaw - lockedRaw) / 1_000_000).toString(),
+    },
+    signatures: deploymentSigs,
+  };
+  const deploymentPath = path.join(repoRoot, "deployments", "devnet.json");
+  writeJson(deploymentPath, deployment);
+  writeJson(path.join(repoRoot, "deployments", "latest.json"), deployment);
+  console.log("Deployment manifest:", deploymentPath);
 
   console.log("\nDone. Config:", configPda.toBase58());
   console.log(

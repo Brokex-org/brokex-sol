@@ -151,6 +151,10 @@ pub fn skew_p_smoothstep(oi_long: u64, oi_short: u64) -> u128 {
 }
 
 /// Numerator for `spread / baseSpread` scaled by PRECISION (dominant: 1+3p, minority: 1-0.2p).
+///
+/// `skew_p` is expected from [`skew_p_smoothstep`], hence in `[0, PRECISION]`; then `skew_p / 5 <= PRECISION / 5`
+/// and `minority_nr >= 4 * PRECISION / 5`. If a caller ever passed `skew_p > 5 * PRECISION`,
+/// `saturating_sub` would floor `minority_nr` to `0` (zero incremental spread scale on the minority side).
 fn spread_scale_numerator(trade_is_long: bool, oi_long: u64, oi_short: u64, skew_p: u128) -> u128 {
     let p = PRECISION;
     let dominant_nr = p.saturating_add(skew_p.saturating_mul(3));
@@ -208,10 +212,10 @@ pub fn execution_price_with_spread(
             .ok_or(CoreError::Overflow.into()),
         (PositionDirection::Short, false) => oracle_price
             .checked_sub(spread_u64)
-            .ok_or(CoreError::InvalidPrice.into()),
+            .ok_or(CoreError::Overflow.into()),
         (PositionDirection::Long, true) => oracle_price
             .checked_sub(spread_u64)
-            .ok_or(CoreError::InvalidPrice.into()),
+            .ok_or(CoreError::Overflow.into()),
         (PositionDirection::Short, true) => oracle_price
             .checked_add(spread_u64)
             .ok_or(CoreError::Overflow.into()),
@@ -476,6 +480,37 @@ mod funding_tests {
 mod tests {
     use super::*;
     use crate::state::PositionDirection;
+
+    #[test]
+    fn zero_base_spread_bps_returns_oracle_unchanged() {
+        let oracle = 123_456_789u64;
+        for is_close in [false, true] {
+            assert_eq!(
+                execution_price_with_spread(
+                    oracle,
+                    0,
+                    PositionDirection::Long,
+                    is_close,
+                    900,
+                    100
+                )
+                .unwrap(),
+                oracle
+            );
+            assert_eq!(
+                execution_price_with_spread(
+                    oracle,
+                    0,
+                    PositionDirection::Short,
+                    is_close,
+                    900,
+                    100
+                )
+                .unwrap(),
+                oracle
+            );
+        }
+    }
 
     #[test]
     fn symmetric_book_entry_matches_base_spread_bps() {

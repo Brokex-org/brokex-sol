@@ -6,6 +6,7 @@ use brokex_vault::VaultState;
 use crate::constants::*;
 use crate::error::CoreError;
 use crate::logic::{sync_risk_from_oi, touch_asset_funding};
+use crate::logic::capital_delta_close_remove_side;
 use crate::state::*;
 
 #[derive(Accounts)]
@@ -84,29 +85,39 @@ pub fn emergency_close_handler(ctx: Context<EmergencyClose>, asset_id: String, _
 
     let asset = &mut ctx.accounts.asset;
 
-    // Capital Unlocking Logic 
-    let mut delta_unlocked = 0;
+    let mut delta_unlocked = 0u64;
 
     if ctx.accounts.position.state == PositionState::Open {
         let now = Clock::get()?.unix_timestamp;
         touch_asset_funding(asset, now)?;
 
-        let locked_before = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);
-        
-        // Unwind Asset state
-        if pos_direction == PositionDirection::Long {
-            asset.oi_long = asset.oi_long.saturating_sub(pos_size);
-            asset.lp_locked_long = asset.lp_locked_long.saturating_sub(pos_size);
-            asset.sum_priced_oi_long = asset.sum_priced_oi_long.saturating_sub(priced_oi);
-        } else {
-            asset.oi_short = asset.oi_short.saturating_sub(pos_size);
-            asset.lp_locked_short = asset.lp_locked_short.saturating_sub(pos_size);
-            asset.sum_priced_oi_short = asset.sum_priced_oi_short.saturating_sub(priced_oi);
-        }
-        sync_risk_from_oi(asset);
+        let contrib = ctx.accounts.position.lp_locked_capital;
+        let (new_rl, new_rs, du) = capital_delta_close_remove_side(
+            asset.lp_locked_long,
+            asset.lp_locked_short,
+            pos_direction == PositionDirection::Long,
+            contrib,
+            asset.alpha_min_fp,
+            asset.alpha_scale,
+        )?;
+        delta_unlocked = du;
 
-        let locked_after = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);
-        delta_unlocked = locked_before.saturating_sub(locked_after);
+        if pos_direction == PositionDirection::Long {
+            asset.oi_long = asset.oi_long.checked_sub(pos_size).ok_or(CoreError::InvariantViolation)?;
+            asset.sum_priced_oi_long = asset
+                .sum_priced_oi_long
+                .checked_sub(priced_oi)
+                .ok_or(CoreError::InvariantViolation)?;
+        } else {
+            asset.oi_short = asset.oi_short.checked_sub(pos_size).ok_or(CoreError::InvariantViolation)?;
+            asset.sum_priced_oi_short = asset
+                .sum_priced_oi_short
+                .checked_sub(priced_oi)
+                .ok_or(CoreError::InvariantViolation)?;
+        }
+        asset.lp_locked_long = new_rl;
+        asset.lp_locked_short = new_rs;
+        sync_risk_from_oi(asset);
     }
 
     // Update Position

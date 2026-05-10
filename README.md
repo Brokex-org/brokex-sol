@@ -240,13 +240,9 @@ All trade execution uses Pyth price feeds directly — no AMM formula. Price con
 
 ### Locked Capital
 
-The Core tracks long and short open interest per asset and computes effective locked capital as:
+Per asset, Core aggregates **risk** on each side (`lp_locked_long` / `lp_locked_short`) from each trade’s `lp_locked_capital` (default: full-OI risk via `profit_cap_fp`). Effective locked capital uses **`needLock`** from matched/dominant risk and alpha efficiency (`@brokex-solana/Extended_MVP.md` §§10–13; see `programs/brokex-core/src/logic.rs`). Opens lock only `max(0, newNeed − oldNeed)` on the Vault; closes unlock `max(0, oldNeed − newNeed)` and never increase lock.
 
-```
-max(lp_locked_long, lp_locked_short)
-```
-
-Trades are rejected if the resulting additional locked capital exceeds available vault free capital.
+Trades are rejected if the incremental lock exceeds available vault free capital.
 
 ### Emergency Mode
 

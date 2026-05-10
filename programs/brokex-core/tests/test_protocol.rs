@@ -71,6 +71,9 @@ fn test_protocol_flow() {
                 commission_open_bps: 0,
                 base_funding_per_year: 10_000,
                 max_funding_per_year: 1_000_000,
+                profit_cap_fp: 0,
+                alpha_min_fp: 0,
+                alpha_scale: 0,
             }
         }
         .data(),

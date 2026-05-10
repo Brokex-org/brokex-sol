@@ -2,12 +2,21 @@ use anchor_lang::prelude::*;
 use crate::state::*;
 use crate::constants::*;
 use crate::error::CoreError;
+use crate::logic::{
+    DEFAULT_ALPHA_MIN_FP, DEFAULT_ALPHA_SCALE, DEFAULT_PROFIT_CAP_FP, PRECISION_U64,
+};
 
 #[derive(AnchorSerialize, AnchorDeserialize)]
 pub struct AssetConfigInput {
     pub commission_open_bps: u64,
     pub base_funding_per_year: u64,
     pub max_funding_per_year: u64,
+    /// Fixed-point on [`crate::logic::PRECISION`]; `0` uses [`DEFAULT_PROFIT_CAP_FP`] (full-OI risk).
+    pub profit_cap_fp: u64,
+    /// Minimum alpha fixed-point; `0` uses [`DEFAULT_ALPHA_MIN_FP`].
+    pub alpha_min_fp: u64,
+    /// Depth scale (risk units); `0` uses [`DEFAULT_ALPHA_SCALE`].
+    pub alpha_scale: u64,
 }
 
 #[derive(Accounts)]
@@ -62,6 +71,29 @@ pub fn add_asset_handler(
     }
     asset.base_funding_per_year = base;
     asset.max_funding_per_year = max;
+
+    let profit_cap_fp = if config_input.profit_cap_fp == 0 {
+        DEFAULT_PROFIT_CAP_FP
+    } else {
+        config_input.profit_cap_fp
+    };
+    let alpha_min_fp = if config_input.alpha_min_fp == 0 {
+        DEFAULT_ALPHA_MIN_FP
+    } else {
+        config_input.alpha_min_fp
+    };
+    let alpha_scale = if config_input.alpha_scale == 0 {
+        DEFAULT_ALPHA_SCALE
+    } else {
+        config_input.alpha_scale
+    };
+
+    require!(profit_cap_fp > 0, CoreError::InvalidCapitalParams);
+    require!(alpha_min_fp <= PRECISION_U64, CoreError::InvalidCapitalParams);
+
+    asset.profit_cap_fp = profit_cap_fp;
+    asset.alpha_min_fp = alpha_min_fp;
+    asset.alpha_scale = alpha_scale;
 
     // Initialize state
     asset.oi_long = 0;

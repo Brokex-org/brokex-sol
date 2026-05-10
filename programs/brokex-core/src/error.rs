@@ -50,4 +50,6 @@ pub enum CoreError {
     InvalidBatchInput,
     #[msg("Invalid funding config (e.g. max funding too low vs base)")]
     InvalidFundingConfig,
+    #[msg("Invalid capital locking parameters")]
+    InvalidCapitalParams,
 }

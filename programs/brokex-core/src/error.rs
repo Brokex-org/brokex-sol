@@ -48,4 +48,6 @@ pub enum CoreError {
     InvalidReferencePrice,
     #[msg("Invalid batch input")]
     InvalidBatchInput,
+    #[msg("Invalid capital locking parameters")]
+    InvalidCapitalParams,
 }

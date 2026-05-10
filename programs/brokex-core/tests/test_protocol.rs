@@ -70,6 +70,9 @@ fn test_protocol_flow() {
             config_input: brokex_core::instructions::AssetConfigInput {
                 commission_open_bps: 0,
                 base_spread_bps: 0,
+                profit_cap_fp: 0,
+                alpha_min_fp: 0,
+                alpha_scale: 0,
             }
         }
         .data(),

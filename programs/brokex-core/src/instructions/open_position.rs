@@ -4,7 +4,10 @@ use crate::state::*;
 use crate::constants::*;
 use crate::oracle;
 use crate::error::CoreError;
-use crate::logic::{calculate_liquidation_price, execution_price_with_spread, validate_sl_tp};
+use crate::logic::{
+    calculate_liquidation_price, capital_delta_open_add_side, execution_price_with_spread,
+    trade_lp_locked_capital, validate_sl_tp,
+};
 
 #[derive(Accounts)]
 #[instruction(asset_id: String)]
@@ -161,22 +164,23 @@ pub fn open_position_handler(
 
     let mut delta_locked = 0;
     let mut actual_entry_price = 0;
+    let mut lp_cap_for_position = 0u64;
 
     if is_market {
         actual_entry_price = entry_price;
         validate_sl_tp(actual_entry_price, direction, sl_price, tp_price)?;
 
-        // Capital Locking Logic 
-        let locked_before = std::cmp::max(asset.lp_locked_long, asset.lp_locked_short);
-        
-        let (new_lp_locked_long, new_lp_locked_short) = if direction == PositionDirection::Long {
-            (asset.lp_locked_long.checked_add(oi).ok_or(CoreError::Overflow)?, asset.lp_locked_short)
-        } else {
-            (asset.lp_locked_long, asset.lp_locked_short.checked_add(oi).ok_or(CoreError::Overflow)?)
-        };
-
-        let locked_after = std::cmp::max(new_lp_locked_long, new_lp_locked_short);
-        delta_locked = locked_after.saturating_sub(locked_before);
+        let contrib = trade_lp_locked_capital(oi, asset.profit_cap_fp)?;
+        lp_cap_for_position = contrib;
+        let (new_rl, new_rs, d_lock) = capital_delta_open_add_side(
+            asset.lp_locked_long,
+            asset.lp_locked_short,
+            direction == PositionDirection::Long,
+            contrib,
+            asset.alpha_min_fp,
+            asset.alpha_scale,
+        )?;
+        delta_locked = d_lock;
 
         // Trade Acceptance Rule 
         let vault_balance = ctx.accounts.vault_token_account.amount;
@@ -206,15 +210,15 @@ pub fn open_position_handler(
         // Update Asset State
         if direction == PositionDirection::Long {
             asset.oi_long = asset.oi_long.checked_add(oi).ok_or(CoreError::Overflow)?;
-            asset.lp_locked_long = asset.lp_locked_long.checked_add(oi).ok_or(CoreError::Overflow)?;
             let priced_oi = (oi as u128).checked_mul(actual_entry_price as u128).ok_or(CoreError::Overflow)?;
             asset.sum_priced_oi_long = asset.sum_priced_oi_long.checked_add(priced_oi).ok_or(CoreError::Overflow)?;
         } else {
             asset.oi_short = asset.oi_short.checked_add(oi).ok_or(CoreError::Overflow)?;
-            asset.lp_locked_short = asset.lp_locked_short.checked_add(oi).ok_or(CoreError::Overflow)?;
             let priced_oi = (oi as u128).checked_mul(actual_entry_price as u128).ok_or(CoreError::Overflow)?;
             asset.sum_priced_oi_short = asset.sum_priced_oi_short.checked_add(priced_oi).ok_or(CoreError::Overflow)?;
         }
+        asset.lp_locked_long = new_rl;
+        asset.lp_locked_short = new_rs;
     }
 
 
@@ -229,7 +233,7 @@ pub fn open_position_handler(
     position.leverage = leverage;
     position.size = oi;
     position.entry_price = actual_entry_price;
-    position.lp_locked_capital = if is_market { oi } else { 0 };
+    position.lp_locked_capital = lp_cap_for_position;
     position.state = if is_market { PositionState::Open } else { PositionState::Pending };
     position.order_type = order_type;
     position.target_price = target_price;

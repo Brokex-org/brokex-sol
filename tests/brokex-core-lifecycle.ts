@@ -261,6 +261,7 @@ describe("brokex-core-lifecycle", () => {
           profitCapFp: new anchor.BN(0),
           alphaMinFp: new anchor.BN(0),
           alphaScale: new anchor.BN(0),
+          baseSpreadFp: new anchor.BN(0),
         })
         .accountsPartial({
           asset: assetPda,
@@ -374,6 +375,216 @@ describe("brokex-core-lifecycle", () => {
       .signers([trader])
       .rpc();
     await assertAccountExists(positionPda, "position");
+  });
+
+  it("addMargin: only collateral and liquidation price change; OI and vault lock unchanged", async () => {
+    const tradeId = await currentPositionId();
+    const positionPda = derivePositionPda(trader.publicKey, assetId, tradeId);
+    const margin = new BN(100_000_000);
+    const leverage = 10;
+
+    await coreProgram.methods
+      .openPosition(
+        assetId,
+        margin,
+        leverage,
+        { long: {} },
+        { market: {} },
+        new BN(0),
+        defaultSlPrice,
+        defaultTpPrice
+      )
+      .accountsPartial({
+        trader: trader.publicKey,
+        config: configPda,
+        asset: assetPda,
+        pythPriceUpdate: oracle60.publicKey,
+        position: positionPda,
+        traderTokenAccount: traderAta,
+        vaultTokenAccount: vaultTokenAta,
+        coreCollateralToken: coreCollateralAta,
+        vaultState: vaultStatePda,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([trader])
+      .rpc();
+
+    const assetBefore = await coreProgram.account.asset.fetch(assetPda);
+    const lockedBefore = await vaultTotalLocked();
+    const posBefore = await coreProgram.account.position.fetch(positionPda);
+
+    const add = new BN(50_000_000);
+    await coreProgram.methods
+      .addMargin(assetId, tradeId, add)
+      .accountsPartial({
+        trader: trader.publicKey,
+        config: configPda,
+        asset: assetPda,
+        position: positionPda,
+        traderTokenAccount: traderAta,
+        coreCollateralToken: coreCollateralAta,
+        settlementAuthority: settlementAuthorityPda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .signers([trader])
+      .rpc();
+
+    const assetAfter = await coreProgram.account.asset.fetch(assetPda);
+    const lockedAfter = await vaultTotalLocked();
+    const posAfter = await coreProgram.account.position.fetch(positionPda);
+
+    const oi = margin.muln(leverage);
+    assert.ok(
+      (assetAfter.oiLong as BN).eq(assetBefore.oiLong as BN),
+      "addMargin must not change OI"
+    );
+    assert.ok(
+      (assetAfter.oiShort as BN).eq(assetBefore.oiShort as BN),
+      "addMargin must not change short OI"
+    );
+    assert.ok(
+      (assetAfter.sumPricedOiLong as BN).eq(
+        assetBefore.sumPricedOiLong as BN
+      ),
+      "addMargin must not change weighted OI"
+    );
+    assert.ok(
+      lockedAfter.eq(lockedBefore),
+      "addMargin must not change vault total_locked_capital"
+    );
+    assert.ok(
+      (posAfter.collateral as BN).eq((posBefore.collateral as BN).add(add)),
+      "collateral should increase by add amount"
+    );
+    assert.ok((posAfter.size as BN).eq(oi), "position size unchanged");
+    assert.ok(
+      (posAfter.liquidationPrice as BN).lt(posBefore.liquidationPrice as BN),
+      "long: more margin should improve liquidation (lower liq price threshold)"
+    );
+
+    await coreProgram.methods
+      .closePosition(assetId, tradeId)
+      .accountsPartial({
+        trader: trader.publicKey,
+        config: configPda,
+        asset: assetPda,
+        position: positionPda,
+        pythPriceUpdate: oracle70.publicKey,
+        vaultTokenAccount: vaultTokenAta,
+        traderTokenAccount: traderAta,
+        coreCollateralToken: coreCollateralAta,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
+        vaultState: vaultStatePda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .signers([trader])
+      .rpc();
+  });
+
+  it("removeMargin: proportional partial close then full close of remainder", async () => {
+    const oiBaseline = await coreProgram.account.asset.fetch(assetPda);
+    const tradeId = await currentPositionId();
+    const positionPda = derivePositionPda(trader.publicKey, assetId, tradeId);
+    const margin = new BN(100_000_000);
+    const leverage = 10;
+    const oi = margin.muln(leverage);
+
+    await coreProgram.methods
+      .openPosition(
+        assetId,
+        margin,
+        leverage,
+        { long: {} },
+        { market: {} },
+        new BN(0),
+        defaultSlPrice,
+        defaultTpPrice
+      )
+      .accountsPartial({
+        trader: trader.publicKey,
+        config: configPda,
+        asset: assetPda,
+        pythPriceUpdate: oracle60.publicKey,
+        position: positionPda,
+        traderTokenAccount: traderAta,
+        vaultTokenAccount: vaultTokenAta,
+        coreCollateralToken: coreCollateralAta,
+        vaultState: vaultStatePda,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([trader])
+      .rpc();
+
+    const assetOpen = await coreProgram.account.asset.fetch(assetPda);
+    const lockedOpen = await vaultTotalLocked();
+
+    const removeAmt = new BN(40_000_000);
+    const oiRemove = oi.mul(removeAmt).div(margin);
+
+    await coreProgram.methods
+      .removeMargin(assetId, tradeId, removeAmt)
+      .accountsPartial({
+        trader: trader.publicKey,
+        config: configPda,
+        asset: assetPda,
+        position: positionPda,
+        pythPriceUpdate: oracle60.publicKey,
+        vaultTokenAccount: vaultTokenAta,
+        traderTokenAccount: traderAta,
+        coreCollateralToken: coreCollateralAta,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
+        vaultState: vaultStatePda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .signers([trader])
+      .rpc();
+
+    const posMid = await coreProgram.account.position.fetch(positionPda);
+    const assetMid = await coreProgram.account.asset.fetch(assetPda);
+
+    assert.ok((posMid.state as { open?: object }).open !== undefined);
+    assert.ok((posMid.size as BN).eq(oi.sub(oiRemove)), "OI scales with margin ratio");
+    assert.ok(
+      (assetMid.oiLong as BN).eq((assetOpen.oiLong as BN).sub(oiRemove)),
+      "asset long OI reduced proportionally"
+    );
+    assert.ok(
+      (await vaultTotalLocked()).lt(lockedOpen),
+      "partial close should unlock some vault capital"
+    );
+
+    await coreProgram.methods
+      .closePosition(assetId, tradeId)
+      .accountsPartial({
+        trader: trader.publicKey,
+        config: configPda,
+        asset: assetPda,
+        position: positionPda,
+        pythPriceUpdate: oracle70.publicKey,
+        vaultTokenAccount: vaultTokenAta,
+        traderTokenAccount: traderAta,
+        coreCollateralToken: coreCollateralAta,
+        settlementAuthority: settlementAuthorityPda,
+        vaultProgram: vaultProgram.programId,
+        vaultState: vaultStatePda,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .signers([trader])
+      .rpc();
+
+    const assetFinal = await coreProgram.account.asset.fetch(assetPda);
+    assert.ok(
+      (assetFinal.oiLong as BN).eq(oiBaseline.oiLong as BN),
+      "position fully closed: asset OI returns to pre-test baseline"
+    );
   });
 
   it("keeps vault total_locked_capital in sync through openPosition and closePosition", async () => {

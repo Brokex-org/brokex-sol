@@ -19,6 +19,8 @@ pub struct AssetConfigInput {
     pub alpha_min_fp: u64,
     /// Depth scale (risk units); `0` uses [`DEFAULT_ALPHA_SCALE`].
     pub alpha_scale: u64,
+    /// Spread fixed-point on [`crate::logic::PRECISION`]; `0` = disabled.
+    pub base_spread_fp: u64,
 }
 
 #[derive(Accounts)]
@@ -93,10 +95,15 @@ pub fn add_asset_handler(
 
     require!(profit_cap_fp > 0, CoreError::InvalidCapitalParams);
     require!(alpha_min_fp <= PRECISION_U64, CoreError::InvalidCapitalParams);
+    require!(
+        config_input.base_spread_fp as u128 <= crate::logic::PRECISION,
+        CoreError::InvalidCapitalParams
+    );
 
     asset.profit_cap_fp = profit_cap_fp;
     asset.alpha_min_fp = alpha_min_fp;
     asset.alpha_scale = alpha_scale;
+    asset.base_spread_fp = config_input.base_spread_fp;
 
     // Initialize state
     asset.oi_long = 0;

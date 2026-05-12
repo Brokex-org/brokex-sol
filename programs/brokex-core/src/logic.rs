@@ -178,7 +178,37 @@ fn spread_scale_numerator(trade_is_long: bool, oi_long: u64, oi_short: u64, skew
 }
 
 /// Execution price after applying dynamic spread; uses OI snapshot **before** exposure updates (`v1.md` dynamic spread — open vs close).
+/// When `base_spread_fp` is non-zero it wins; otherwise `base_spread_bps` is used.
 pub fn execution_price_with_spread(
+    oracle_price: u64,
+    base_spread_fp: u64,
+    base_spread_bps: u64,
+    direction: PositionDirection,
+    is_close: bool,
+    oi_long: u64,
+    oi_short: u64,
+) -> Result<u64> {
+    if base_spread_fp != 0 {
+        return execution_price_with_spread_fp(
+            oracle_price,
+            base_spread_fp,
+            direction,
+            is_close,
+            oi_long,
+            oi_short,
+        );
+    }
+    execution_price_with_spread_bps(
+        oracle_price,
+        base_spread_bps,
+        direction,
+        is_close,
+        oi_long,
+        oi_short,
+    )
+}
+
+fn execution_price_with_spread_bps(
     oracle_price: u64,
     base_spread_bps: u64,
     direction: PositionDirection,
@@ -375,20 +405,122 @@ pub fn validate_sl_tp(reference_price: u64, direction: PositionDirection, sl_pri
     Ok(())
 }
 
-pub fn calculate_liquidation_price(entry_price: u64, leverage: u8, direction: PositionDirection) -> Result<u64> {
+/// Liquidation threshold 100%: `move = entryPrice * collateral / positionSize` (same as `entry/leverage` at open when `size = margin * leverage`).
+pub fn calculate_liquidation_price(
+    entry_price: u64,
+    position_size: u64,
+    collateral: u64,
+    direction: PositionDirection,
+) -> Result<u64> {
     require!(entry_price > 0, CoreError::InvalidReferencePrice);
-    require!(leverage > 0, CoreError::Overflow);
+    require!(collateral > 0, CoreError::Overflow);
+    require!(position_size > 0, CoreError::Overflow);
 
-    let move_amount = entry_price
-        .checked_div(leverage as u64)
+    let move_amount = (entry_price as u128)
+        .checked_mul(collateral as u128)
+        .ok_or(CoreError::Overflow)?
+        .checked_div(position_size as u128)
         .ok_or(CoreError::Overflow)?;
+    let move_u64 = u64::try_from(move_amount).map_err(|_| error!(CoreError::Overflow))?;
 
     let liq_price = match direction {
-        PositionDirection::Long => entry_price.saturating_sub(move_amount),
-        PositionDirection::Short => entry_price.checked_add(move_amount).ok_or(CoreError::Overflow)?,
+        PositionDirection::Long => entry_price.saturating_sub(move_u64),
+        PositionDirection::Short => entry_price.checked_add(move_u64).ok_or(CoreError::Overflow)?,
     };
 
     Ok(liq_price)
+}
+
+/// Extended MVP §§8–9 / EVM `_applySpread`. Uses **pre-trade** OI (book before this fill updates aggregates).
+/// `base_spread_fp`: fixed-point on [`PRECISION`] (same as `Asset.base_spread_fp`), not decimal basis points.
+/// `is_close`: `false` = open, `true` = close.
+fn execution_price_with_spread_fp(
+    oracle_price: u64,
+    base_spread_fp: u64,
+    direction: PositionDirection,
+    is_close: bool,
+    oi_long: u64,
+    oi_short: u64,
+) -> Result<u64> {
+    if base_spread_fp == 0 {
+        return Ok(oracle_price);
+    }
+    require!(oracle_price > 0, CoreError::InvalidReferencePrice);
+    require!(
+        (base_spread_fp as u128) <= PRECISION,
+        CoreError::InvalidCapitalParams
+    );
+
+    let spread_fp = effective_spread_fp_u128(base_spread_fp, oi_long, oi_short, direction)?;
+    let amount = (oracle_price as u128)
+        .checked_mul(spread_fp)
+        .ok_or(CoreError::Overflow)?
+        .checked_div(PRECISION)
+        .ok_or(CoreError::Overflow)?;
+    let amount_u64 = u64::try_from(amount).map_err(|_| error!(CoreError::Overflow))?;
+
+    match direction {
+        PositionDirection::Long => {
+            if is_close {
+                oracle_price
+                    .checked_sub(amount_u64)
+                    .ok_or(error!(CoreError::InvalidReferencePrice))
+            } else {
+                oracle_price
+                    .checked_add(amount_u64)
+                    .ok_or(error!(CoreError::Overflow))
+            }
+        }
+        PositionDirection::Short => {
+            if is_close {
+                oracle_price
+                    .checked_add(amount_u64)
+                    .ok_or(error!(CoreError::Overflow))
+            } else {
+                oracle_price
+                    .checked_sub(amount_u64)
+                    .ok_or(error!(CoreError::InvalidReferencePrice))
+            }
+        }
+    }
+}
+
+fn effective_spread_fp_u128(
+    base_spread_fp: u64,
+    oi_long: u64,
+    oi_short: u64,
+    direction: PositionDirection,
+) -> Result<u128> {
+    let base = base_spread_fp as u128;
+    let total = (oi_long as u128).saturating_add(oi_short as u128);
+    if total == 0 || oi_long == oi_short {
+        return Ok(base);
+    }
+
+    let p = smoothstep_skew_fp(oi_long, oi_short);
+    let is_dominant = (direction == PositionDirection::Long && oi_long > oi_short)
+        || (direction == PositionDirection::Short && oi_short > oi_long);
+
+    if is_dominant {
+        let numer = PRECISION
+            .checked_add(3u128.saturating_mul(p))
+            .ok_or(CoreError::Overflow)?;
+        base.checked_mul(numer)
+            .ok_or(CoreError::Overflow)?
+            .checked_div(PRECISION)
+            .ok_or(CoreError::Overflow.into())
+    } else {
+        let red = 200_000u128
+            .checked_mul(p)
+            .ok_or(CoreError::Overflow)?
+            .checked_div(PRECISION)
+            .ok_or(CoreError::Overflow)?;
+        let mult = PRECISION.saturating_sub(red);
+        base.checked_mul(mult)
+            .ok_or(CoreError::Overflow)?
+            .checked_div(PRECISION)
+            .ok_or(CoreError::Overflow.into())
+    }
 }
 
 #[cfg(test)]
@@ -409,6 +541,7 @@ mod funding_tests {
             profit_cap_fp: DEFAULT_PROFIT_CAP_FP,
             alpha_min_fp: DEFAULT_ALPHA_MIN_FP,
             alpha_scale: DEFAULT_ALPHA_SCALE,
+            base_spread_fp: 0,
             oi_long: ol,
             oi_short: os,
             risk_long: ol,
@@ -489,6 +622,7 @@ mod tests {
                 execution_price_with_spread(
                     oracle,
                     0,
+                    0,
                     PositionDirection::Long,
                     is_close,
                     900,
@@ -500,6 +634,7 @@ mod tests {
             assert_eq!(
                 execution_price_with_spread(
                     oracle,
+                    0,
                     0,
                     PositionDirection::Short,
                     is_close,
@@ -519,17 +654,17 @@ mod tests {
         let base_abs = (oracle as u128 * bps as u128 / 10000) as u64;
 
         let open_long =
-            execution_price_with_spread(oracle, bps, PositionDirection::Long, false, 50, 50).unwrap();
+            execution_price_with_spread(oracle, 0, bps, PositionDirection::Long, false, 50, 50).unwrap();
         let open_short =
-            execution_price_with_spread(oracle, bps, PositionDirection::Short, false, 50, 50).unwrap();
+            execution_price_with_spread(oracle, 0, bps, PositionDirection::Short, false, 50, 50).unwrap();
 
         assert_eq!(open_long, oracle + base_abs);
         assert_eq!(open_short, oracle - base_abs);
 
         let close_long =
-            execution_price_with_spread(oracle, bps, PositionDirection::Long, true, 50, 50).unwrap();
+            execution_price_with_spread(oracle, 0, bps, PositionDirection::Long, true, 50, 50).unwrap();
         let close_short =
-            execution_price_with_spread(oracle, bps, PositionDirection::Short, true, 50, 50).unwrap();
+            execution_price_with_spread(oracle, 0, bps, PositionDirection::Short, true, 50, 50).unwrap();
 
         assert_eq!(close_long, oracle - base_abs);
         assert_eq!(close_short, oracle + base_abs);
@@ -541,18 +676,18 @@ mod tests {
         let bps = 100u64;
 
         let balanced_long =
-            execution_price_with_spread(oracle, bps, PositionDirection::Long, false, 500, 500).unwrap();
+            execution_price_with_spread(oracle, 0, bps, PositionDirection::Long, false, 500, 500).unwrap();
         let skewed_long =
-            execution_price_with_spread(oracle, bps, PositionDirection::Long, false, 900, 100).unwrap();
+            execution_price_with_spread(oracle, 0, bps, PositionDirection::Long, false, 900, 100).unwrap();
         assert!(
             skewed_long > balanced_long,
             "opening long on already-long-heavy book widens spread"
         );
 
         let balanced_short =
-            execution_price_with_spread(oracle, bps, PositionDirection::Short, false, 500, 500).unwrap();
+            execution_price_with_spread(oracle, 0, bps, PositionDirection::Short, false, 500, 500).unwrap();
         let skewed_short =
-            execution_price_with_spread(oracle, bps, PositionDirection::Short, false, 900, 100).unwrap();
+            execution_price_with_spread(oracle, 0, bps, PositionDirection::Short, false, 900, 100).unwrap();
         assert!(
             skewed_short > balanced_short,
             "opening short against long-heavy book is minority side — tighter (higher short entry price)"
@@ -607,5 +742,85 @@ mod tests {
         let old_n = need_lock(rl, rs, alpha_min, scale).unwrap();
         let new_n = need_lock(rl - contrib, rs, alpha_min, scale).unwrap();
         assert_eq!(du, old_n.saturating_sub(new_n));
+    }
+
+    #[test]
+    fn spread_zero_passes_oracle_through() {
+        use crate::state::PositionDirection;
+        let p = execution_price_with_spread(
+            1_000_000,
+            0,
+            0,
+            PositionDirection::Long,
+            true,
+            100,
+            50,
+        )
+        .unwrap();
+        assert_eq!(p, 1_000_000);
+    }
+
+    #[test]
+    fn spread_long_close_below_oracle_balanced_book() {
+        use crate::state::PositionDirection;
+        let oracle = 1_000_000u64;
+        let base = 10_000u64;
+        let close = execution_price_with_spread(
+            oracle,
+            base,
+            0,
+            PositionDirection::Long,
+            true,
+            500,
+            500,
+        )
+        .unwrap();
+        assert_eq!(close, 990_000);
+    }
+
+    #[test]
+    fn spread_long_open_above_oracle_empty_book() {
+        use crate::state::PositionDirection;
+        let oracle = 1_000_000u64;
+        let base = 10_000u64;
+        let open = execution_price_with_spread(
+            oracle,
+            base,
+            0,
+            PositionDirection::Long,
+            false,
+            0,
+            0,
+        )
+        .unwrap();
+        assert_eq!(open, 1_010_000);
+    }
+
+    #[test]
+    fn spread_prefers_fp_when_both_configured() {
+        let oracle = 1_000_000u64;
+        let fp = 10_000u64;
+        let bps = 100u64;
+        let fp_close = execution_price_with_spread(
+            oracle,
+            fp,
+            bps,
+            PositionDirection::Long,
+            true,
+            500,
+            500,
+        )
+        .unwrap();
+        let fp_only = execution_price_with_spread(
+            oracle,
+            fp,
+            0,
+            PositionDirection::Long,
+            true,
+            500,
+            500,
+        )
+        .unwrap();
+        assert_eq!(fp_close, fp_only);
     }
 }

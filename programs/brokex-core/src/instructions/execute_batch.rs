@@ -231,12 +231,19 @@ fn execute_order_open<'info>(
     position_info: &AccountInfo<'info>,
     oracle_price: u64,
 ) -> Result<()> {
-    let (oi_long, oi_short, base_spread_bps, commission_open_bps) = {
+    let (oi_long, oi_short, base_spread_fp, base_spread_bps, commission_open_bps) = {
         let a = &ctx.accounts.asset;
-        (a.oi_long, a.oi_short, a.base_spread_bps, a.commission_open_bps)
+        (
+            a.oi_long,
+            a.oi_short,
+            a.base_spread_fp,
+            a.base_spread_bps,
+            a.commission_open_bps,
+        )
     };
     let execution_price = execution_price_with_spread(
         oracle_price,
+        base_spread_fp,
         base_spread_bps,
         position.direction,
         false,
@@ -315,7 +322,8 @@ fn execute_order_open<'info>(
     position.collateral = margin;
     position.size = oi;
     position.entry_price = execution_price;
-    position.liquidation_price = calculate_liquidation_price(execution_price, position.leverage, position.direction)?;
+    position.liquidation_price =
+        calculate_liquidation_price(execution_price, oi, margin, position.direction)?;
     position.lp_locked_capital = contrib;
     position.state = PositionState::Open;
     position.execution_status = ExecutionStatus::Executed;
@@ -336,12 +344,13 @@ fn execute_order_close<'info>(
     oracle_price: u64,
     is_liquidation: bool,
 ) -> Result<()> {
-    let (oi_long, oi_short, base_spread_bps) = {
+    let (oi_long, oi_short, base_spread_fp, base_spread_bps) = {
         let a = &ctx.accounts.asset;
-        (a.oi_long, a.oi_short, a.base_spread_bps)
+        (a.oi_long, a.oi_short, a.base_spread_fp, a.base_spread_bps)
     };
     let execution_price = execution_price_with_spread(
         oracle_price,
+        base_spread_fp,
         base_spread_bps,
         position.direction,
         true,
@@ -380,7 +389,12 @@ fn execute_order_close<'info>(
         token::transfer(cpi_ctx, funding_fee)?;
     }
 
-    let pnl = signed_pnl(position.size, position.entry_price, execution_price, position.direction)?;
+    let pnl = signed_pnl(
+        position.size,
+        position.entry_price,
+        execution_price,
+        position.direction,
+    )?;
 
     let (vault_pay_trader_profit, vault_collect_loss, core_pay_trader) = if is_liquidation {
         (0, effective_collateral, 0)

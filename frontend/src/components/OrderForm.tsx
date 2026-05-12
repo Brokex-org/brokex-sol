@@ -303,7 +303,7 @@ export const OrderForm = () => {
   const handleDevnetFundUsdc = async () => {
     const provider = (window as any).solana;
     if (!provider?.isPhantom) {
-      addToast({ type: 'warning', title: 'Wallet', message: 'Connect Phantom first.' });
+      addToast({ type: 'warning', title: 'Wallet', message: 'Connect your wallet first.' });
       return;
     }
     try {
@@ -728,7 +728,7 @@ export const OrderForm = () => {
               }
             }}
             style={{ flex: 1, backgroundColor: goldAccent, color: '#fff', border: 'none', borderRadius: '4px', padding: '0.7rem', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', transition: 'opacity 0.2s' }}>
-            Connect Phantom
+            Connect Wallet
           </button>
         ) : (
           <button

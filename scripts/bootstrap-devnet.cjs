@@ -238,6 +238,7 @@ async function main() {
           profitCapFp: new anchor.BN(0),
           alphaMinFp: new anchor.BN(0),
           alphaScale: new anchor.BN(0),
+          baseSpreadFp: new anchor.BN(0),
         })
         .accounts({
           asset: assetPda,

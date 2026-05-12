@@ -106,6 +106,7 @@ pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String, _tr
     let (
         oi_long,
         oi_short,
+        base_spread_fp,
         base_spread_bps,
         pos_direction,
         lp_remove,
@@ -118,6 +119,7 @@ pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String, _tr
         (
             asset.oi_long,
             asset.oi_short,
+            asset.base_spread_fp,
             asset.base_spread_bps,
             pos.direction,
             pos.lp_locked_capital,
@@ -129,6 +131,7 @@ pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String, _tr
 
     let close_price = execution_price_with_spread(
         oracle_price,
+        base_spread_fp,
         base_spread_bps,
         pos_direction,
         true,

@@ -498,7 +498,7 @@ export function MobilePortfolio() {
               <path d="M18 12a2 2 0 0 0-2 2c0 1.1.9 2 2 2h4v-4h-4z" />
             </svg>
             <p style={{ margin: 0, color: themeTextMuted, fontSize: '0.85rem', textAlign: 'center' }}>
-              Connect Phantom (header) or an EVM wallet to view your portfolio.
+              Connect your wallet to view your portfolio.
             </p>
             <button
               type="button"
@@ -526,7 +526,7 @@ export function MobilePortfolio() {
                 cursor: 'pointer',
               }}
             >
-              Connect Phantom or EVM
+              Connect Wallet
             </button>
           </div>
         )}

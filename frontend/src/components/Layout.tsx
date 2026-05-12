@@ -222,10 +222,10 @@ export function Layout() {
                   (window as unknown as { solana?: { isPhantom?: boolean } }).solana?.isPhantom
                     ? phantomAddress
                       ? `Phantom: ${phantomAddress.slice(0, 4)}…${phantomAddress.slice(-4)} (click to disconnect)`
-                      : 'Connect Phantom (Solana Devnet)'
+                      : 'Connect Wallet'
                     : user
-                      ? 'Disconnect EVM wallet (Dynamic)'
-                      : 'Connect EVM wallet (Dynamic) — install Phantom for Solana trading'
+                      ? 'Disconnect wallet'
+                      : 'Connect Wallet'
                 }
               >
                 <WalletIcon />

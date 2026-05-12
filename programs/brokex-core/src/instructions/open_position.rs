@@ -111,13 +111,14 @@ pub fn open_position_handler(
     )?;
 
     // Pre-trade book only — execution price before funding touch or OI updates (§9).
-    let (oi_snap_l, oi_snap_s, base_spread_fp) = {
+    let (oi_snap_l, oi_snap_s, base_spread_fp, base_spread_bps) = {
         let a = &ctx.accounts.asset;
-        (a.oi_long, a.oi_short, a.base_spread_fp)
+        (a.oi_long, a.oi_short, a.base_spread_fp, a.base_spread_bps)
     };
     let entry_price = execution_price_with_spread(
         oracle_price,
         base_spread_fp,
+        base_spread_bps,
         direction,
         false,
         oi_snap_l,
@@ -264,7 +265,13 @@ pub fn open_position_handler(
     position.bump = ctx.bumps.position;
     ctx.accounts.config.next_position_id = position_id.checked_add(1).ok_or(CoreError::Overflow)?;
 
-    msg!("Position opened: ID={}, Price={}, Size={}, Locked={}", position.asset_id, entry_price, oi, delta_locked);
+    msg!(
+        "Position opened: ID={}, Price={}, Size={}, Locked={}",
+        position.asset_id,
+        actual_entry_price,
+        oi,
+        delta_locked
+    );
 
     Ok(())
 }

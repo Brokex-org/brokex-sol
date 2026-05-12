@@ -7,10 +7,9 @@ use brokex_vault::VaultState;
 use crate::constants::*;
 use crate::error::CoreError;
 use crate::logic::{
-    execution_price_with_spread, funding_fee_amount, funding_index_for_direction,
-    sync_risk_from_oi, touch_asset_funding,
+    capital_delta_close_remove_side, execution_price_with_spread, funding_fee_amount,
+    funding_index_for_direction, sync_risk_from_oi, touch_asset_funding,
 };
-use crate::logic::capital_delta_close_remove_side;
 use crate::oracle;
 use crate::state::*;
 
@@ -104,29 +103,44 @@ pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String, _tr
         200,
     )?;
 
-    let pos_direction = ctx.accounts.position.direction;
-    let (oi_snap_l, oi_snap_s, base_spread) = {
-        let a = &ctx.accounts.asset;
-        (a.oi_long, a.oi_short, a.base_spread_fp)
+    let (
+        oi_long,
+        oi_short,
+        base_spread_fp,
+        base_spread_bps,
+        pos_direction,
+        lp_remove,
+        open_funding_index,
+        pos_collateral,
+        pos_size,
+    ) = {
+        let asset = &ctx.accounts.asset;
+        let pos = &ctx.accounts.position;
+        (
+            asset.oi_long,
+            asset.oi_short,
+            asset.base_spread_fp,
+            asset.base_spread_bps,
+            pos.direction,
+            pos.lp_locked_capital,
+            pos.open_funding_index,
+            pos.collateral,
+            pos.size,
+        )
     };
-
-    // Capture data from position to avoid borrow checker issues later
-    let (pos_size, open_funding_index, pos_collateral) = (
-        ctx.accounts.position.size,
-        ctx.accounts.position.open_funding_index,
-        ctx.accounts.position.collateral,
-    );
 
     let close_price = execution_price_with_spread(
         oracle_price,
-        base_spread,
+        base_spread_fp,
+        base_spread_bps,
         pos_direction,
         true,
-        oi_snap_l,
-        oi_snap_s,
+        oi_long,
+        oi_short,
     )?;
 
     let asset = &mut ctx.accounts.asset;
+
     let now = Clock::get()?.unix_timestamp;
     touch_asset_funding(asset, now)?;
     let funding_idx = funding_index_for_direction(asset, pos_direction);
@@ -151,11 +165,6 @@ pub fn close_position_handler(ctx: Context<ClosePosition>, asset_id: String, _tr
         );
         token::transfer(cpi_ctx, funding_fee)?;
     }
-    let (pos_direction, _pos_size, lp_remove) = (
-        ctx.accounts.position.direction,
-        ctx.accounts.position.size,
-        ctx.accounts.position.lp_locked_capital,
-    );
 
     let (new_rl, new_rs, delta_unlocked) = capital_delta_close_remove_side(
         asset.lp_locked_long,

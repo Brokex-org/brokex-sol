@@ -124,15 +124,16 @@ pub fn remove_margin_handler(
         ctx.accounts.position.lp_locked_capital,
     );
 
-    let (oi_snap_l, oi_snap_s, base_spread_fp) = {
+    let (oi_snap_l, oi_snap_s, base_spread_fp, base_spread_bps) = {
         let a = &ctx.accounts.asset;
-        (a.oi_long, a.oi_short, a.base_spread_fp)
+        (a.oi_long, a.oi_short, a.base_spread_fp, a.base_spread_bps)
     };
 
     // Exit price from pre-trade book only — before funding touch or OI mutation (§9).
     let close_price = execution_price_with_spread(
         oracle_price,
         base_spread_fp,
+        base_spread_bps,
         pos_dir,
         true,
         oi_snap_l,

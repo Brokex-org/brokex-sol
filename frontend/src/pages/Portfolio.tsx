@@ -531,7 +531,7 @@ export function Portfolio() {
       <div className="port-scrollbar" style={{ flex: 1, overflowY: 'auto', overflowX: 'auto' }}>
         {!portfolioViewerAddress ? (
           <div style={{ padding: '5rem', textAlign: 'center', color: themeTextMuted, fontSize: '0.85rem' }}>
-            Connect Phantom (Solana) or your EVM wallet (Dynamic) to view your portfolio.
+            Connect your wallet to view your portfolio.
           </div>
         ) : isLoading ? (
           <div style={{ padding: '5rem', textAlign: 'center', color: themeTextMuted, fontSize: '0.85rem' }}>Loading…</div>

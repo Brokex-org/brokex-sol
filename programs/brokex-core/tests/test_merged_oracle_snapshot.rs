@@ -178,6 +178,78 @@ fn merged_oracle_snapshot_success_two_assets() {
 }
 
 #[test]
+fn merged_oracle_snapshot_ok_zero_active_assets_empty_remaining() {
+    let program_id = brokex_core::id();
+    let bytes = brokex_core_elf();
+    let mut ctx = AnchorLiteSVM::build_with_program(program_id, bytes);
+    let admin = Keypair::new();
+    ctx.airdrop(&admin.pubkey(), 10_000_000_000).unwrap();
+    let (config_pda, _) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
+    init_protocol(&mut ctx, program_id, &admin, config_pda);
+
+    let cfg: ProtocolConfig = ctx.get_account(&config_pda).unwrap();
+    assert_eq!(cfg.active_enabled_asset_count, 0);
+
+    let payer = Keypair::new();
+    ctx.airdrop(&payer.pubkey(), 10_000_000).unwrap();
+
+    let ix = validate_merged_ix(program_id, config_pda, &[]);
+    ctx.execute_instruction(ix, &[&payer])
+        .expect("exec")
+        .assert_success();
+}
+
+#[test]
+fn merged_oracle_rejects_when_protocol_paused() {
+    let program_id = brokex_core::id();
+    let bytes = brokex_core_elf();
+    let mut ctx = AnchorLiteSVM::build_with_program(program_id, bytes);
+    let admin = Keypair::new();
+    ctx.airdrop(&admin.pubkey(), 10_000_000_000).unwrap();
+    let (config_pda, _) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
+
+    init_protocol(&mut ctx, program_id, &admin, config_pda);
+
+    let pyth_btc = Pubkey::new_unique();
+    let pyth_eth = Pubkey::new_unique();
+    let asset_btc = add_asset(&mut ctx, program_id, &admin, config_pda, "BTC/USD", pyth_btc);
+    let asset_eth = add_asset(&mut ctx, program_id, &admin, config_pda, "ETH/USD", pyth_eth);
+
+    let k_btc = mock_pyth_fresh_keypair();
+    let k_eth = mock_pyth_fresh_keypair();
+    ctx.airdrop(&k_btc.pubkey(), 1_000_000).unwrap();
+    ctx.airdrop(&k_eth.pubkey(), 1_000_000).unwrap();
+
+    let pause_ix = Instruction {
+        program_id,
+        accounts: brokex_core::accounts::ToggleProtocolStatus {
+            admin: admin.pubkey(),
+            config: config_pda,
+        }
+        .to_account_metas(None),
+        data: brokex_core::instruction::ToggleProtocolStatus { is_paused: true }.data(),
+    };
+    ctx.execute_instruction(pause_ix, &[&admin])
+        .expect("pause")
+        .assert_success();
+
+    let payer = Keypair::new();
+    ctx.airdrop(&payer.pubkey(), 10_000_000).unwrap();
+
+    let ix = validate_merged_ix(
+        program_id,
+        config_pda,
+        &[
+            (asset_btc, k_btc.pubkey()),
+            (asset_eth, k_eth.pubkey()),
+        ],
+    );
+    ctx.execute_instruction(ix, &[&payer])
+        .expect("exec")
+        .assert_failure();
+}
+
+#[test]
 fn merged_oracle_rejects_count_mismatch_too_few_pairs() {
     let program_id = brokex_core::id();
     let bytes = brokex_core_elf();

@@ -68,4 +68,8 @@ pub enum CoreError {
     MergedOraclePublishTimeMismatch,
     #[msg("Merged oracle proof: invalid or wrong-program asset account")]
     InvalidOracleAssetAccount,
+    #[msg("Oracle validation params invalid (e.g. max age or max confidence must be non-zero)")]
+    InvalidOracleParams,
+    #[msg("Protocol is in emergency mode")]
+    EmergencyModeActive,
 }

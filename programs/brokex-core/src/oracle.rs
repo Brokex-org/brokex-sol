@@ -142,10 +142,14 @@ pub fn require_all_same_publish_time(times: &[i64]) -> Result<()> {
     Ok(())
 }
 
-/// Validates one Pyth account per **enabled** asset: count match, unique assets, each price fresh,
-/// and a single shared `publish_time` across all feeds (Extended MVP §26).
+/// Validates Pyth updates against **exactly** `active_enabled_asset_count` distinct core [`Asset`](crate::state::Asset) accounts,
+/// each with `is_enabled == true`, plus a matching Pyth account per pair. That matches “every enabled market” **only if**
+/// `active_enabled_asset_count` is kept in sync with the true enabled-asset count (see `ProtocolConfig::active_enabled_asset_count`).
 ///
-/// `remaining` must be `[asset, pyth, asset, pyth, ...]` for exactly `active_enabled_asset_count` pairs.
+/// Also enforces: unique asset keys, per-feed freshness and confidence, and one shared `publish_time` (Extended MVP §26).
+///
+/// `remaining` must be `[asset, pyth, asset, pyth, ...]` with length `2 * active_enabled_asset_count`, except when
+/// `active_enabled_asset_count == 0`: then `remaining` must be empty and this returns `Ok` immediately (nothing to validate).
 pub fn validate_merged_oracle_for_active_assets<'info>(
     program_id: &Pubkey,
     remaining: &'info [AccountInfo<'info>],
@@ -155,6 +159,7 @@ pub fn validate_merged_oracle_for_active_assets<'info>(
 ) -> Result<()> {
     let n = active_enabled_asset_count as usize;
     if n == 0 {
+        // Intentional: no listed markets — empty proof is valid; do not “fix” by requiring dummy accounts.
         require!(remaining.is_empty(), CoreError::OracleProofCountMismatch);
         return Ok(());
     }

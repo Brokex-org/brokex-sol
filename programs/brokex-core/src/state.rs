@@ -11,6 +11,8 @@ pub struct ProtocolConfig {
     pub usdc_mint: Pubkey,
     pub vault: Pubkey,
     pub vault_state: Pubkey,
+    /// Number of assets with `is_enabled == true`. Used for merged-oracle proofs (Extended MVP §26).
+    pub active_enabled_asset_count: u32,
 }
 
 #[account]

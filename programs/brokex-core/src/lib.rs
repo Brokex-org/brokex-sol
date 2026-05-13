@@ -145,4 +145,13 @@ pub mod brokex_core {
     ) -> Result<()> {
         instructions::remove_margin_handler(ctx, asset_id, trade_id, amount)
     }
+
+    /// Validates a merged oracle payload covering all enabled assets (Extended MVP §26).
+    pub fn validate_merged_oracle_snapshot(
+        ctx: Context<ValidateMergedOracleSnapshot>,
+        max_age_secs: u64,
+        max_conf_bps: u64,
+    ) -> Result<()> {
+        instructions::validate_merged_oracle_snapshot_handler(ctx, max_age_secs, max_conf_bps)
+    }
 }

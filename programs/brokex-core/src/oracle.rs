@@ -38,6 +38,22 @@ pub fn get_validated_price(
     max_age_secs:  u64,
     max_conf_bps:  u64,
 ) -> Result<u64> {
+    Ok(get_validated_price_with_publish_time(
+        price_account,
+        expected_feed,
+        max_age_secs,
+        max_conf_bps,
+    )?
+    .0)
+}
+
+/// Same as [`get_validated_price`], but returns Pyth `publish_time` for merged-batch checks (Extended MVP §26).
+pub fn get_validated_price_with_publish_time(
+    price_account: &AccountInfo,
+    expected_feed: &[u8; 32],
+    max_age_secs:  u64,
+    max_conf_bps:  u64,
+) -> Result<(u64, i64)> {
     #[cfg(not(feature = "mock-oracle"))]
     let expected_owner = PYTH_RECEIVER_PROGRAM_ID
         .parse::<Pubkey>()
@@ -50,9 +66,26 @@ pub fn get_validated_price(
     #[cfg(feature = "mock-oracle")]
     {
         if price_account.owner == &anchor_lang::solana_program::system_program::ID {
-            // Derive price from the first byte of the key to allow control in tests
-            let price = price_account.key().to_bytes()[0] as u64;
-            return Ok(PRICE_PRECISION * price);
+            let kb = price_account.key().to_bytes();
+            let price = kb[0] as u64;
+            let current_time = Clock::get()?.unix_timestamp;
+            // `kb[31]==0xFF`: key[1] = simulated age in seconds (staleness tests).
+            // `kb[31]==0xFE`: bytes[1..9] = explicit publish_time (i64 le) for merged-batch tests.
+            let publish_time = if kb[31] == 0xFE {
+                i64::from_le_bytes(kb[1..9].try_into().unwrap())
+            } else {
+                let age_secs = if kb[31] == 0xFF { kb[1] as u64 } else { 0u64 };
+                current_time
+                    .checked_sub(age_secs as i64)
+                    .ok_or(error!(CoreError::InvalidPrice))?
+            };
+            require!(current_time >= publish_time, CoreError::FuturePrice);
+            let age = (current_time - publish_time) as u64;
+            require!(age <= max_age_secs, CoreError::StalePrice);
+            let norm = PRICE_PRECISION
+                .checked_mul(price)
+                .ok_or(error!(CoreError::Overflow))?;
+            return Ok((norm, publish_time));
         }
     }
 
@@ -76,10 +109,10 @@ pub fn get_validated_price(
 
     // 5. Staleness check
     let current_time = Clock::get()?.unix_timestamp;
-    
+
     // Explicitly check for future prices before subtraction to avoid overflow/underflow
     require!(current_time >= msg.publish_time, CoreError::FuturePrice);
-    
+
     let age = (current_time - msg.publish_time) as u64;
     require!(age <= max_age_secs, CoreError::StalePrice);
 
@@ -95,7 +128,71 @@ pub fn get_validated_price(
     require!(conf_bps <= max_conf_bps as u128, CoreError::ConfidenceTooWide);
 
     //  Normalization to 1e6
-    normalize_price(msg.price.unsigned_abs(), msg.exponent)
+    let norm = normalize_price(msg.price.unsigned_abs(), msg.exponent)?;
+    Ok((norm, msg.publish_time))
+}
+
+/// All feeds in a merged proof must share one `publish_time` (single Hermes / batch payload).
+pub fn require_all_same_publish_time(times: &[i64]) -> Result<()> {
+    require!(!times.is_empty(), CoreError::InvariantViolation);
+    let t0 = times[0];
+    for t in &times[1..] {
+        require!(*t == t0, CoreError::MergedOraclePublishTimeMismatch);
+    }
+    Ok(())
+}
+
+/// Validates one Pyth account per **enabled** asset: count match, unique assets, each price fresh,
+/// and a single shared `publish_time` across all feeds (Extended MVP §26).
+///
+/// `remaining` must be `[asset, pyth, asset, pyth, ...]` for exactly `active_enabled_asset_count` pairs.
+pub fn validate_merged_oracle_for_active_assets<'info>(
+    program_id: &Pubkey,
+    remaining: &'info [AccountInfo<'info>],
+    active_enabled_asset_count: u32,
+    max_age_secs: u64,
+    max_conf_bps: u64,
+) -> Result<()> {
+    let n = active_enabled_asset_count as usize;
+    if n == 0 {
+        require!(remaining.is_empty(), CoreError::OracleProofCountMismatch);
+        return Ok(());
+    }
+    let expected_len = n
+        .checked_mul(2)
+        .ok_or(error!(CoreError::Overflow))?;
+    require!(
+        remaining.len() == expected_len,
+        CoreError::OracleProofCountMismatch
+    );
+
+    let mut seen: Vec<Pubkey> = Vec::with_capacity(n);
+    let mut publish_times: Vec<i64> = Vec::with_capacity(n);
+
+    for i in 0..n {
+        let asset_ai = &remaining[2 * i];
+        let pyth_ai = &remaining[2 * i + 1];
+
+        let asset = Account::<crate::state::Asset>::try_from(asset_ai)
+            .map_err(|_| error!(CoreError::InvalidOracleAssetAccount))?;
+        require_keys_eq!(*asset_ai.owner, *program_id, CoreError::InvalidOracleAssetAccount);
+
+        require!(asset.is_enabled, CoreError::AssetDisabled);
+
+        let k = asset_ai.key();
+        require!(!seen.contains(&k), CoreError::OracleProofDuplicateAsset);
+        seen.push(k);
+
+        let (_price, pt) = get_validated_price_with_publish_time(
+            pyth_ai,
+            &asset.pyth_feed.to_bytes(),
+            max_age_secs,
+            max_conf_bps,
+        )?;
+        publish_times.push(pt);
+    }
+
+    require_all_same_publish_time(&publish_times)
 }
 
 /// Scales the raw Pyth price to 1e6 precision based on the exponent.

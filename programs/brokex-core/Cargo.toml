@@ -44,5 +44,10 @@ name = "test_protocol"
 path = "tests/test_protocol.rs"
 required-features = ["litesvm-integration"]
 
+[[test]]
+name = "test_merged_oracle_snapshot"
+path = "tests/test_merged_oracle_snapshot.rs"
+required-features = ["litesvm-integration", "mock-oracle"]
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

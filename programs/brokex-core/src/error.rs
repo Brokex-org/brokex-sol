@@ -60,4 +60,12 @@ pub enum CoreError {
     PartialCloseUndercollateralized,
     #[msg("Oracle mark is at or past liquidation after this margin removal")]
     PositionUnhealthyAfterMarginRemoval,
+    #[msg("Merged oracle proof: account count does not match active asset count")]
+    OracleProofCountMismatch,
+    #[msg("Merged oracle proof: duplicate asset account")]
+    OracleProofDuplicateAsset,
+    #[msg("Merged oracle proof: publish times must match across all feeds (single batch)")]
+    MergedOraclePublishTimeMismatch,
+    #[msg("Merged oracle proof: invalid or wrong-program asset account")]
+    InvalidOracleAssetAccount,
 }

@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use brokex_core::oracle::{normalize_price, PriceFeedMessage, PRICE_PRECISION};
+use brokex_core::oracle::{normalize_price, require_all_same_publish_time, PriceFeedMessage, PRICE_PRECISION};
 
 // Offset math: 8 (discriminator) + 32 (header)
 const MSG_OFFSET_BASE: usize = 40;
@@ -97,4 +97,14 @@ fn price_within_max_age() {
 fn price_beyond_max_age() {
     let age = 1_000_000i64.saturating_sub(999_900);
     assert!((age as u64) > 60);
+}
+
+#[test]
+fn merged_publish_times_all_equal_ok() {
+    require_all_same_publish_time(&[42, 42, 42]).unwrap();
+}
+
+#[test]
+fn merged_publish_times_mismatch_rejected() {
+    assert!(require_all_same_publish_time(&[42, 43]).is_err());
 }

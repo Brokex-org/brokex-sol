@@ -36,6 +36,7 @@ pub struct AddAsset<'info> {
     pub asset: Account<'info, Asset>,
     
     #[account(
+        mut,
         seeds = [CONFIG_SEED],
         bump,
         constraint = config.admin == admin.key() @ CoreError::Unauthorized
@@ -117,7 +118,13 @@ pub fn add_asset_handler(
     asset.funding_index_long = 0;
     asset.funding_index_short = 0;
     asset.last_funding_update = 0;
-    
+
+    let cfg = &mut ctx.accounts.config;
+    cfg.active_enabled_asset_count = cfg
+        .active_enabled_asset_count
+        .checked_add(1)
+        .ok_or(error!(CoreError::Overflow))?;
+
     msg!("Asset added: {} with feed: {}", asset_id, pyth_feed);
     Ok(())
 }

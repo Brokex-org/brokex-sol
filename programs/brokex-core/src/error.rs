@@ -48,7 +48,7 @@ pub enum CoreError {
     InvalidReferencePrice,
     #[msg("Invalid batch input")]
     InvalidBatchInput,
-    #[msg("Invalid funding config (e.g. max funding too low vs base)")]
+    #[msg("Invalid funding config ( max funding too low vs base)")]
     InvalidFundingConfig,
     #[msg("Invalid capital locking parameters")]
     InvalidCapitalParams,
@@ -68,7 +68,7 @@ pub enum CoreError {
     MergedOraclePublishTimeMismatch,
     #[msg("Merged oracle proof: invalid or wrong-program asset account")]
     InvalidOracleAssetAccount,
-    #[msg("Oracle validation params invalid (e.g. max age or max confidence must be non-zero)")]
+    #[msg("Oracle validation params invalid ( max age or max confidence must be non-zero)")]
     InvalidOracleParams,
     #[msg("Protocol is in emergency mode")]
     EmergencyModeActive,

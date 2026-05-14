@@ -21,9 +21,11 @@ pub mod brokex_vault {
     // also import `accounts` from the parent crate (e.g. re-exports), causing E0428 duplicate name.
     use anchor_lang::prelude::{Context, Result};
     use super::{
-        initialize_handler, set_paused_handler, deposit_handler, withdraw_handler, settle_handler,
-        update_locked_capital_handler,
-        AdminSetPaused, Initialize, VaultDeposit, VaultSettle, VaultWithdraw, UpdateLockedCapital,
+        admin_set_reported_unrealized_pnl_handler, deposit_handler, initialize_handler,
+        lp_deposit_handler, lp_withdraw_handler, set_paused_handler, settle_handler,
+        update_locked_capital_handler, withdraw_handler,
+        AdminSetPaused, AdminSetReportedUnrealizedPnl, Initialize, LpDeposit, LpWithdraw,
+        UpdateLockedCapital, VaultDeposit, VaultSettle, VaultWithdraw,
     };
 
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
@@ -48,5 +50,23 @@ pub mod brokex_vault {
 
     pub fn update_locked_capital(ctx: Context<UpdateLockedCapital>, delta: i64) -> Result<()> {
         update_locked_capital_handler(ctx, delta)
+    }
+
+    /// Admin-only NAV input until Core supplies §22 uPnL on-chain.
+    pub fn admin_set_reported_unrealized_pnl(
+        ctx: Context<AdminSetReportedUnrealizedPnl>,
+        reported_unrealized_pnl: i128,
+    ) -> Result<()> {
+        admin_set_reported_unrealized_pnl_handler(ctx, reported_unrealized_pnl)
+    }
+
+    /// Public LP deposit 
+    pub fn lp_deposit(ctx: Context<LpDeposit>, amount: u64, min_shares: u64) -> Result<()> {
+        lp_deposit_handler(ctx, amount, min_shares)
+    }
+
+    /// Public LP withdraw
+    pub fn lp_withdraw(ctx: Context<LpWithdraw>, shares: u64, min_usdc: u64) -> Result<()> {
+        lp_withdraw_handler(ctx, shares, min_usdc)
     }
 }

@@ -69,9 +69,12 @@ pub fn get_validated_price_with_publish_time(
             let kb = price_account.key().to_bytes();
             let price = kb[0] as u64;
             let current_time = Clock::get()?.unix_timestamp;
+            // `kb[30]==0xFE`: publish_time = now - kb[1] seconds (for merged-batch mismatch tests; easy to grind).
             // `kb[31]==0xFF`: key[1] = simulated age in seconds (staleness tests).
-            // `kb[31]==0xFE`: bytes[1..9] = explicit publish_time (i64 le) for merged-batch tests.
-            let publish_time = if kb[31] == 0xFE {
+            // `kb[31]==0xFE` (and byte 30 is not 0xFE): bytes[1..9] = explicit publish_time (i64 le).
+            let publish_time = if kb[30] == 0xFE {
+                current_time.saturating_sub(kb[1] as i64)
+            } else if kb[31] == 0xFE {
                 i64::from_le_bytes(kb[1..9].try_into().unwrap())
             } else {
                 let age_secs = if kb[31] == 0xFF { kb[1] as u64 } else { 0u64 };

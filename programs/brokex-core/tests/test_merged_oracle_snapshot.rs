@@ -1,10 +1,12 @@
 //! Requires `target/deploy/brokex_core.so` built with `--features mock-oracle` (see `package.json` `build:mock-oracle:sbf`).
-use anchor_lang::{AnchorSerialize, InstructionData, ToAccountMetas};
+use anchor_lang::solana_program::system_program;
+use anchor_lang::{AccountDeserialize, AccountSerialize, AnchorSerialize, InstructionData, ToAccountMetas};
 use anchor_litesvm::{
     build_anchor_instruction, AccountMeta, AnchorContext, AnchorLiteSVM, Instruction, Keypair,
     Pubkey, Signer, TransactionResult,
 };
 use brokex_core::{constants::*, state::*};
+use solana_account::Account as StoredAccount;
 use std::path::PathBuf;
 
 fn brokex_core_elf() -> &'static [u8] {
@@ -31,25 +33,44 @@ fn asset_config() -> brokex_core::instructions::AssetConfigInput {
     }
 }
 
-/// Mock Pyth: system-owned account; `pubkey[0] > 0` price; avoid `pubkey[31]` in 0xFE/0xFF unless testing those paths.
+/// Mock Pyth: system-owned account; `pubkey[0] > 0` price; avoid reserved sentinel bytes (see `oracle.rs` mock).
 fn mock_pyth_fresh_keypair() -> Keypair {
-    loop {
+    const MAX_ITERS: usize = 500_000;
+    for _ in 0..MAX_ITERS {
         let k = Keypair::new();
         let b = k.pubkey().to_bytes();
-        if b[0] > 0 && b[31] != 0xFE && b[31] != 0xFF {
+        if b[0] > 0 && b[30] != 0xFE && b[31] != 0xFE && b[31] != 0xFF {
             return k;
         }
     }
+    panic!("mock_pyth_fresh_keypair: exceeded {MAX_ITERS} iterations");
 }
 
 fn mock_pyth_stale_keypair() -> Keypair {
-    loop {
+    const MAX_ITERS: usize = 500_000;
+    for _ in 0..MAX_ITERS {
         let k = Keypair::new();
         let b = k.pubkey().to_bytes();
         if b[31] == 0xFF && b[1] >= 100 {
             return k;
         }
     }
+    panic!("mock_pyth_stale_keypair: exceeded {MAX_ITERS} iterations (need 0xFF sentinel + age>=100)");
+}
+
+/// Pyth mock: `pubkey[30]==0xFE` ⇒ `publish_time = now - pubkey[1]` (see `oracle.rs`); grindable for merge tests.
+fn mock_pyth_publish_offset_keypair(seconds_ago: u8) -> Keypair {
+    const MAX_ITERS: usize = 500_000;
+    for _ in 0..MAX_ITERS {
+        let k = Keypair::new();
+        let b = k.pubkey().to_bytes();
+        if b[30] == 0xFE && b[0] > 0 && b[1] == seconds_ago && b[31] != 0xFF {
+            return k;
+        }
+    }
+    panic!(
+        "mock_pyth_publish_offset_keypair: exceeded {MAX_ITERS} iterations (seconds_ago={seconds_ago})"
+    );
 }
 
 fn init_protocol(
@@ -120,11 +141,22 @@ fn validate_merged_ix(
     config_pda: Pubkey,
     asset_pyth_pairs: &[(Pubkey, Pubkey)],
 ) -> Instruction {
+    validate_merged_ix_with_extra_remaining(program_id, config_pda, asset_pyth_pairs, &[])
+}
+
+/// Same as [`validate_merged_ix`], but appends extra `AccountMeta` entries after the asset/pyth pairs (too-many-accounts tests).
+fn validate_merged_ix_with_extra_remaining(
+    program_id: Pubkey,
+    config_pda: Pubkey,
+    asset_pyth_pairs: &[(Pubkey, Pubkey)],
+    trailing: &[AccountMeta],
+) -> Instruction {
     let mut metas = brokex_core::accounts::ValidateMergedOracleSnapshot { config: config_pda }.to_account_metas(None);
     for (asset, pyth) in asset_pyth_pairs {
         metas.push(AccountMeta::new_readonly(*asset, false));
         metas.push(AccountMeta::new_readonly(*pyth, false));
     }
+    metas.extend_from_slice(trailing);
     build_anchor_instruction(
         &program_id,
         "validate_merged_oracle_snapshot",
@@ -135,6 +167,27 @@ fn validate_merged_ix(
         },
     )
     .expect("build ix")
+}
+
+fn set_config_emergency_mode(ctx: &mut AnchorContext, config_pda: Pubkey, emergency_mode: bool) {
+    let sol = ctx.svm.get_account(&config_pda).expect("config account");
+    let mut cfg =
+        ProtocolConfig::try_deserialize(&mut sol.data.as_slice()).expect("deserialize ProtocolConfig");
+    cfg.emergency_mode = emergency_mode;
+    let mut data = Vec::new();
+    cfg.try_serialize(&mut data).expect("serialize ProtocolConfig");
+    ctx.svm
+        .set_account(
+            config_pda,
+            StoredAccount {
+                lamports: sol.lamports,
+                data,
+                owner: sol.owner,
+                executable: sol.executable,
+                rent_epoch: sol.rent_epoch,
+            },
+        )
+        .expect("set_account config");
 }
 
 #[test]
@@ -250,7 +303,7 @@ fn merged_oracle_rejects_when_protocol_paused() {
 }
 
 #[test]
-fn merged_oracle_rejects_count_mismatch_too_few_pairs() {
+fn merged_oracle_rejects_oracle_proof_count_mismatch_too_few_remaining() {
     let program_id = brokex_core::id();
     let bytes = brokex_core_elf();
     let mut ctx = AnchorLiteSVM::build_with_program(program_id, bytes);
@@ -282,7 +335,61 @@ fn merged_oracle_rejects_count_mismatch_too_few_pairs() {
 
     let ix = validate_merged_ix(program_id, config_pda, &[(a1, k.pubkey())]);
     let r: TransactionResult = ctx.execute_instruction(ix, &[&payer]).expect("exec");
-    r.assert_failure();
+    r.assert_failure().assert_log_error("OracleProofCountMismatch");
+}
+
+#[test]
+fn merged_oracle_rejects_oracle_proof_count_mismatch_too_many_remaining() {
+    let program_id = brokex_core::id();
+    let bytes = brokex_core_elf();
+    let mut ctx = AnchorLiteSVM::build_with_program(program_id, bytes);
+    let admin = Keypair::new();
+    ctx.airdrop(&admin.pubkey(), 10_000_000_000).unwrap();
+    let (config_pda, _) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
+    init_protocol(&mut ctx, program_id, &admin, config_pda);
+
+    let asset_btc = add_asset(
+        &mut ctx,
+        program_id,
+        &admin,
+        config_pda,
+        "BTC/USD",
+        Pubkey::new_unique(),
+    );
+    let asset_eth = add_asset(
+        &mut ctx,
+        program_id,
+        &admin,
+        config_pda,
+        "ETH/USD",
+        Pubkey::new_unique(),
+    );
+
+    let k_btc = mock_pyth_fresh_keypair();
+    let k_eth = mock_pyth_fresh_keypair();
+    ctx.airdrop(&k_btc.pubkey(), 1_000_000).unwrap();
+    ctx.airdrop(&k_eth.pubkey(), 1_000_000).unwrap();
+
+    let payer = Keypair::new();
+    ctx.airdrop(&payer.pubkey(), 10_000_000).unwrap();
+
+    let trailing = [
+        AccountMeta::new_readonly(system_program::ID, false),
+        AccountMeta::new_readonly(Pubkey::new_unique(), false),
+    ];
+    let ix = validate_merged_ix_with_extra_remaining(
+        program_id,
+        config_pda,
+        &[
+            (asset_btc, k_btc.pubkey()),
+            (asset_eth, k_eth.pubkey()),
+        ],
+        &trailing,
+    );
+    ctx.execute_instruction(ix, &[&payer])
+        .expect("exec")
+        .assert_failure()
+        .assert_log_error("OracleProofCountMismatch");
 }
 
 #[test]
@@ -315,7 +422,7 @@ fn merged_oracle_rejects_stale_price() {
 }
 
 #[test]
-fn merged_oracle_rejects_duplicate_asset_slot() {
+fn merged_oracle_rejects_oracle_proof_duplicate_asset() {
     let program_id = brokex_core::id();
     let bytes = brokex_core_elf();
     let mut ctx = AnchorLiteSVM::build_with_program(program_id, bytes);
@@ -355,11 +462,12 @@ fn merged_oracle_rejects_duplicate_asset_slot() {
     );
     ctx.execute_instruction(ix, &[&payer])
         .expect("exec")
-        .assert_failure();
+        .assert_failure()
+        .assert_log_error("OracleProofDuplicateAsset");
 }
 
 #[test]
-fn merged_oracle_rejects_disabled_asset_in_proof() {
+fn merged_oracle_rejects_disabled_asset_in_remaining_accounts() {
     let program_id = brokex_core::id();
     let bytes = brokex_core_elf();
     let mut ctx = AnchorLiteSVM::build_with_program(program_id, bytes);
@@ -367,7 +475,7 @@ fn merged_oracle_rejects_disabled_asset_in_proof() {
     ctx.airdrop(&admin.pubkey(), 10_000_000_000).unwrap();
     let (config_pda, _) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
     init_protocol(&mut ctx, program_id, &admin, config_pda);
-    let a1 = add_asset(
+    let _a1 = add_asset(
         &mut ctx,
         program_id,
         &admin,
@@ -401,10 +509,51 @@ fn merged_oracle_rejects_disabled_asset_in_proof() {
     let cfg: ProtocolConfig = ctx.get_account(&config_pda).unwrap();
     assert_eq!(cfg.active_enabled_asset_count, 1);
 
-    let k1 = mock_pyth_fresh_keypair();
     let k2 = mock_pyth_fresh_keypair();
+    ctx.airdrop(&k2.pubkey(), 1_000_000).unwrap();
+    let payer = Keypair::new();
+    ctx.airdrop(&payer.pubkey(), 10_000_000).unwrap();
+
+    // Exactly one pair (active count is 1) but the asset is disabled → `AssetDisabled`.
+    let ix = validate_merged_ix(program_id, config_pda, &[(a2, k2.pubkey())]);
+    ctx.execute_instruction(ix, &[&payer])
+        .expect("exec")
+        .assert_failure()
+        .assert_log_error("AssetDisabled");
+}
+
+#[test]
+fn merged_oracle_rejects_merged_oracle_publish_time_mismatch() {
+    let program_id = brokex_core::id();
+    let bytes = brokex_core_elf();
+    let mut ctx = AnchorLiteSVM::build_with_program(program_id, bytes);
+    let admin = Keypair::new();
+    ctx.airdrop(&admin.pubkey(), 10_000_000_000).unwrap();
+    let (config_pda, _) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
+    init_protocol(&mut ctx, program_id, &admin, config_pda);
+
+    let a1 = add_asset(
+        &mut ctx,
+        program_id,
+        &admin,
+        config_pda,
+        "BTC/USD",
+        Pubkey::new_unique(),
+    );
+    let a2 = add_asset(
+        &mut ctx,
+        program_id,
+        &admin,
+        config_pda,
+        "ETH/USD",
+        Pubkey::new_unique(),
+    );
+
+    let k1 = mock_pyth_publish_offset_keypair(0);
+    let k2 = mock_pyth_publish_offset_keypair(20);
     ctx.airdrop(&k1.pubkey(), 1_000_000).unwrap();
     ctx.airdrop(&k2.pubkey(), 1_000_000).unwrap();
+
     let payer = Keypair::new();
     ctx.airdrop(&payer.pubkey(), 10_000_000).unwrap();
 
@@ -415,5 +564,46 @@ fn merged_oracle_rejects_disabled_asset_in_proof() {
     );
     ctx.execute_instruction(ix, &[&payer])
         .expect("exec")
-        .assert_failure();
+        .assert_failure()
+        .assert_log_error("MergedOraclePublishTimeMismatch");
+}
+
+#[test]
+fn merged_oracle_rejects_when_emergency_mode_active() {
+    let program_id = brokex_core::id();
+    let bytes = brokex_core_elf();
+    let mut ctx = AnchorLiteSVM::build_with_program(program_id, bytes);
+    let admin = Keypair::new();
+    ctx.airdrop(&admin.pubkey(), 10_000_000_000).unwrap();
+    let (config_pda, _) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
+
+    init_protocol(&mut ctx, program_id, &admin, config_pda);
+
+    let pyth_btc = Pubkey::new_unique();
+    let pyth_eth = Pubkey::new_unique();
+    let asset_btc = add_asset(&mut ctx, program_id, &admin, config_pda, "BTC/USD", pyth_btc);
+    let asset_eth = add_asset(&mut ctx, program_id, &admin, config_pda, "ETH/USD", pyth_eth);
+
+    let k_btc = mock_pyth_fresh_keypair();
+    let k_eth = mock_pyth_fresh_keypair();
+    ctx.airdrop(&k_btc.pubkey(), 1_000_000).unwrap();
+    ctx.airdrop(&k_eth.pubkey(), 1_000_000).unwrap();
+
+    set_config_emergency_mode(&mut ctx, config_pda, true);
+
+    let payer = Keypair::new();
+    ctx.airdrop(&payer.pubkey(), 10_000_000).unwrap();
+
+    let ix = validate_merged_ix(
+        program_id,
+        config_pda,
+        &[
+            (asset_btc, k_btc.pubkey()),
+            (asset_eth, k_eth.pubkey()),
+        ],
+    );
+    ctx.execute_instruction(ix, &[&payer])
+        .expect("exec")
+        .assert_failure()
+        .assert_log_error("EmergencyModeActive");
 }

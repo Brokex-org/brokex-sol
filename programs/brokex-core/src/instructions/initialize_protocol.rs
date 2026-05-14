@@ -34,7 +34,8 @@ pub fn initialize_protocol_handler(
     config.usdc_mint = usdc_mint;
     config.vault = vault;
     config.vault_state = vault_state;
-    
+    config.active_enabled_asset_count = 0;
+
     msg!("Protocol initialized with admin: {}", config.admin);
     Ok(())
 }

@@ -82,6 +82,9 @@ fn test_protocol_flow() {
     };
     send_ix(&mut ctx, add_asset_ix, &admin);
 
+    let config_data: ProtocolConfig = ctx.get_account(&config_pda).expect("config not found");
+    assert_eq!(config_data.active_enabled_asset_count, 1);
+
     let toggle_asset_ix = Instruction {
         program_id,
         accounts: brokex_core::accounts::ToggleAssetStatus {

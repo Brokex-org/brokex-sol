@@ -11,6 +11,10 @@ pub struct ProtocolConfig {
     pub usdc_mint: Pubkey,
     pub vault: Pubkey,
     pub vault_state: Pubkey,
+    /// **Invariant:** must always equal the number of [`Asset`] accounts with `is_enabled == true`.
+    /// Every instruction that adds an asset or toggles `Asset::is_enabled` must update this field;
+    /// merged-oracle validation (Extended MVP §26) trusts this count for proof completeness.
+    pub active_enabled_asset_count: u32,
 }
 
 #[account]

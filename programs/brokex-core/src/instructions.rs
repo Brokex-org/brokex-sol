@@ -12,6 +12,7 @@ pub mod update_sl_tp;
 pub mod execute_batch;
 pub mod add_margin;
 pub mod remove_margin;
+pub mod validate_merged_oracle_snapshot;
 
 pub use initialize_protocol::*;
 pub use add_asset::*;
@@ -27,3 +28,4 @@ pub use update_sl_tp::*;
 pub use execute_batch::*;
 pub use add_margin::*;
 pub use remove_margin::*;
+pub use validate_merged_oracle_snapshot::*;

@@ -48,7 +48,7 @@ pub enum CoreError {
     InvalidReferencePrice,
     #[msg("Invalid batch input")]
     InvalidBatchInput,
-    #[msg("Invalid funding config (e.g. max funding too low vs base)")]
+    #[msg("Invalid funding config ( max funding too low vs base)")]
     InvalidFundingConfig,
     #[msg("Invalid capital locking parameters")]
     InvalidCapitalParams,
@@ -60,4 +60,16 @@ pub enum CoreError {
     PartialCloseUndercollateralized,
     #[msg("Oracle mark is at or past liquidation after this margin removal")]
     PositionUnhealthyAfterMarginRemoval,
+    #[msg("Merged oracle proof: account count does not match active asset count")]
+    OracleProofCountMismatch,
+    #[msg("Merged oracle proof: duplicate asset account")]
+    OracleProofDuplicateAsset,
+    #[msg("Merged oracle proof: publish times must match across all feeds (single batch)")]
+    MergedOraclePublishTimeMismatch,
+    #[msg("Merged oracle proof: invalid or wrong-program asset account")]
+    InvalidOracleAssetAccount,
+    #[msg("Oracle validation params invalid ( max age or max confidence must be non-zero)")]
+    InvalidOracleParams,
+    #[msg("Protocol is in emergency mode")]
+    EmergencyModeActive,
 }

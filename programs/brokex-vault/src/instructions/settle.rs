@@ -13,9 +13,14 @@ pub fn settle_handler(ctx: Context<VaultSettle>, profit: u64, loss: u64) -> Resu
     let signer = &[seeds];
 
     if profit > 0 {
+        let free_capital = ctx
+            .accounts
+            .vault_token
+            .amount
+            .saturating_sub(ctx.accounts.vault_state.total_locked_capital);
         require!(
-            profit <= ctx.accounts.vault_token.amount,
-            ErrorCode::InsufficientBalance
+            profit <= free_capital,
+            ErrorCode::InsufficientFreeCapital
         );
 
         let cpi_accounts = Transfer {

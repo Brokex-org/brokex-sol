@@ -47,6 +47,12 @@ pub enum ErrorCode {
     #[msg("Invalid vault value")]
     InvalidVaultValue,
 
+    #[msg("LP NAV non-positive; cannot price shares")]
+    LpNavNonPositive,
+
+    #[msg("Slippage tolerance exceeded")]
+    SlippageExceeded,
+
     #[msg("Invalid unlock amount")]
     InvalidUnlockAmount,
 }

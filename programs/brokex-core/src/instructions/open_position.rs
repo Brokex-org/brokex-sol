@@ -213,6 +213,7 @@ pub fn open_position_handler(
             let cpi_accounts = brokex_vault::cpi::accounts::UpdateLockedCapital {
                 caller: ctx.accounts.settlement_authority.to_account_info(),
                 vault_state: ctx.accounts.vault_state.to_account_info(),
+                vault_token: ctx.accounts.vault_token_account.to_account_info(),
             };
             let cpi_ctx = CpiContext::new_with_signer(
                 ctx.accounts.vault_program.to_account_info().key(),
@@ -255,7 +256,13 @@ pub fn open_position_handler(
     position.sl_price = sl_price;
     position.tp_price = tp_price;
     position.liquidation_price = if is_market {
-        calculate_liquidation_price(actual_entry_price, oi, margin, direction)?
+        calculate_liquidation_price(
+            actual_entry_price,
+            oi,
+            margin,
+            direction,
+            asset.liquidation_threshold_bps,
+        )?
     } else {
         validate_sl_tp(target_price, direction, sl_price, tp_price)?;
         0

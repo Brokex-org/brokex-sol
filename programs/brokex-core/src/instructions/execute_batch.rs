@@ -301,6 +301,7 @@ fn execute_order_open<'info>(
         let cpi_accounts = brokex_vault::cpi::accounts::UpdateLockedCapital {
             caller: ctx.accounts.settlement_authority.to_account_info(),
             vault_state: ctx.accounts.vault_state.to_account_info(),
+            vault_token: ctx.accounts.vault_token_account.to_account_info(),
         };
         let cpi_ctx = CpiContext::new_with_signer(ctx.accounts.vault_program.to_account_info().key(), cpi_accounts, signers);
         brokex_vault::cpi::update_locked_capital(cpi_ctx, delta_locked as i64)?;
@@ -322,8 +323,13 @@ fn execute_order_open<'info>(
     position.collateral = margin;
     position.size = oi;
     position.entry_price = execution_price;
-    position.liquidation_price =
-        calculate_liquidation_price(execution_price, oi, margin, position.direction)?;
+    position.liquidation_price = calculate_liquidation_price(
+        execution_price,
+        oi,
+        margin,
+        position.direction,
+        asset.liquidation_threshold_bps,
+    )?;
     position.lp_locked_capital = contrib;
     position.state = PositionState::Open;
     position.execution_status = ExecutionStatus::Executed;
@@ -422,6 +428,7 @@ fn execute_order_close<'info>(
         let cpi_accounts = brokex_vault::cpi::accounts::UpdateLockedCapital {
             caller: ctx.accounts.settlement_authority.to_account_info(),
             vault_state: ctx.accounts.vault_state.to_account_info(),
+            vault_token: ctx.accounts.vault_token_account.to_account_info(),
         };
         let cpi_ctx = CpiContext::new_with_signer(ctx.accounts.vault_program.to_account_info().key(), cpi_accounts, signers);
         brokex_vault::cpi::update_locked_capital(cpi_ctx, -(delta_unlocked as i64))?;

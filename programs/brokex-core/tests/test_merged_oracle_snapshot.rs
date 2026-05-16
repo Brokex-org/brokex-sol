@@ -30,6 +30,7 @@ fn asset_config() -> brokex_core::instructions::AssetConfigInput {
         alpha_min_fp: 0,
         alpha_scale: 0,
         base_spread_fp: 0,
+        liquidation_threshold_bps: 0,
     }
 }
 

@@ -13,6 +13,7 @@ pub mod execute_batch;
 pub mod add_margin;
 pub mod remove_margin;
 pub mod validate_merged_oracle_snapshot;
+pub mod sync_vault_unrealized_pnl;
 
 pub use initialize_protocol::*;
 pub use add_asset::*;
@@ -29,3 +30,4 @@ pub use execute_batch::*;
 pub use add_margin::*;
 pub use remove_margin::*;
 pub use validate_merged_oracle_snapshot::*;
+pub use sync_vault_unrealized_pnl::*;

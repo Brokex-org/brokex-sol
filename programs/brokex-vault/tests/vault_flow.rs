@@ -245,6 +245,7 @@ impl Fixture {
             vault_accounts::UpdateLockedCapital {
                 caller: self.core.pubkey(),
                 vault_state: self.vault_state,
+                vault_token: self.vault_token,
             }
             .to_account_metas(None),
         )
@@ -1107,6 +1108,7 @@ fn update_locked_capital_non_core_rejected() {
         vault_accounts::UpdateLockedCapital {
             caller: f.attacker.pubkey(),
             vault_state: f.vault_state,
+            vault_token: f.vault_token,
         }
         .to_account_metas(None),
     );
@@ -1118,10 +1120,50 @@ fn update_locked_capital_non_core_rejected() {
 fn update_locked_capital_core_succeeds() {
     let mut f = Fixture::new_uninitialized();
     f.initialize();
+    let ix = f.deposit_ix(f.admin_ata, 1_000_000);
+    exec_ok(&mut f.ctx, ix, &[&f.admin]);
     let ix = f.update_locked_ix(123);
     exec_ok(&mut f.ctx, ix, &[&f.core]);
     assert_eq!(f.vault_state_account().total_locked_capital, 123);
     let ix = f.update_locked_ix(-23);
     exec_ok(&mut f.ctx, ix, &[&f.core]);
     assert_eq!(f.vault_state_account().total_locked_capital, 100);
+}
+
+#[test]
+fn admin_withdraw_rejects_when_amount_exceeds_free_capital() {
+    let mut f = Fixture::new_uninitialized();
+    f.initialize();
+    let ix = f.deposit_ix(f.admin_ata, 10_000_000);
+    exec_ok(&mut f.ctx, ix, &[&f.admin]);
+    let ix = f.update_locked_ix(9_000_000);
+    exec_ok(&mut f.ctx, ix, &[&f.core]);
+    // free capital 1M; withdraw 2M
+    let ix = f.withdraw_ix(f.admin_ata, 2_000_000);
+    let r = exec(&mut f.ctx, ix, &[&f.admin]);
+    assert_anchor_err(&r, "InsufficientFreeCapital");
+}
+
+#[test]
+fn admin_withdraw_free_capital_succeeds() {
+    let mut f = Fixture::new_uninitialized();
+    f.initialize();
+    let ix = f.deposit_ix(f.admin_ata, 10_000_000);
+    exec_ok(&mut f.ctx, ix, &[&f.admin]);
+    let ix = f.update_locked_ix(9_000_000);
+    exec_ok(&mut f.ctx, ix, &[&f.core]);
+    let ix = f.withdraw_ix(f.admin_ata, 1_000_000);
+    exec_ok(&mut f.ctx, ix, &[&f.admin]);
+    f.ctx.svm.assert_token_balance(&f.vault_token, 9_000_000);
+}
+
+#[test]
+fn update_locked_capital_rejects_when_lock_exceeds_vault_balance() {
+    let mut f = Fixture::new_uninitialized();
+    f.initialize();
+    let ix = f.deposit_ix(f.admin_ata, 5_000_000);
+    exec_ok(&mut f.ctx, ix, &[&f.admin]);
+    let ix = f.update_locked_ix(6_000_000);
+    let r = exec(&mut f.ctx, ix, &[&f.core]);
+    assert_anchor_err(&r, "InvalidVaultValue");
 }

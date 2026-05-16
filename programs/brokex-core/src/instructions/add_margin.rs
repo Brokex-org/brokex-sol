@@ -93,6 +93,7 @@ pub fn add_margin_handler(
         position.size,
         new_collateral,
         position.direction,
+        ctx.accounts.asset.liquidation_threshold_bps,
     )?;
 
     Ok(())

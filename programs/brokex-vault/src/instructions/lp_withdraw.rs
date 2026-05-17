@@ -3,6 +3,7 @@ use anchor_spl::token::{self, Burn, Transfer};
 
 use crate::LpWithdraw;
 use crate::error::ErrorCode;
+use crate::vault_math;
 use super::lp_nav;
 
 pub fn lp_withdraw_handler(ctx: Context<LpWithdraw>, shares: u64, min_usdc: u64) -> Result<()> {
@@ -22,11 +23,8 @@ pub fn lp_withdraw_handler(ctx: Context<LpWithdraw>, shares: u64, min_usdc: u64)
 
     let usdc_out = lp_nav::usdc_for_withdraw(shares, vault_balance, supply, pnl)?;
 
-    let free_capital = vault_balance.saturating_sub(vault_state.total_locked_capital);
-    require!(
-        usdc_out <= free_capital,
-        ErrorCode::InsufficientFreeCapital
-    );
+    let free_capital = vault_math::free_capital(vault_balance, vault_state.total_locked_capital)?;
+    require!(usdc_out <= free_capital, ErrorCode::InsufficientFreeCapital);
 
     require!(usdc_out >= min_usdc, ErrorCode::SlippageExceeded);
 

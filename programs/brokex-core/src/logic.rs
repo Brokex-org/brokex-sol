@@ -426,15 +426,17 @@ pub fn calculate_liquidation_price(
         CoreError::InvalidCapitalParams
     );
 
+    let divisor = (10_000u128)
+        .checked_mul(position_size as u128)
+        .ok_or(CoreError::Overflow)?;
     let move_amount = (entry_price as u128)
         .checked_mul(liquidation_threshold_bps as u128)
         .ok_or(CoreError::Overflow)?
         .checked_mul(collateral as u128)
         .ok_or(CoreError::Overflow)?
-        .checked_div(10_000u128)
-        .ok_or(CoreError::Overflow)?
-        .checked_div(position_size as u128)
+        .checked_div(divisor)
         .ok_or(CoreError::Overflow)?;
+    require!(move_amount > 0, CoreError::InvalidCapitalParams);
     let move_u64 = u64::try_from(move_amount).map_err(|_| error!(CoreError::Overflow))?;
 
     let liq_price = match direction {
@@ -465,8 +467,9 @@ pub fn trader_unrealized_pnl_for_asset(asset: &crate::state::Asset, current_pric
             .ok_or(CoreError::Overflow)?
             .checked_div(avg_u as i128)
             .ok_or(CoreError::Overflow)?;
-        if pnl > asset.risk_long as i128 {
-            pnl = asset.risk_long as i128;
+        let max_pnl = trade_lp_locked_capital(asset.oi_long, asset.profit_cap_fp)? as i128;
+        if pnl > max_pnl {
+            pnl = max_pnl;
         }
         total = total.checked_add(pnl).ok_or(CoreError::Overflow)?;
     }
@@ -486,8 +489,9 @@ pub fn trader_unrealized_pnl_for_asset(asset: &crate::state::Asset, current_pric
             .ok_or(CoreError::Overflow)?
             .checked_div(avg_u as i128)
             .ok_or(CoreError::Overflow)?;
-        if pnl > asset.risk_short as i128 {
-            pnl = asset.risk_short as i128;
+        let max_pnl = trade_lp_locked_capital(asset.oi_short, asset.profit_cap_fp)? as i128;
+        if pnl > max_pnl {
+            pnl = max_pnl;
         }
         total = total.checked_add(pnl).ok_or(CoreError::Overflow)?;
     }

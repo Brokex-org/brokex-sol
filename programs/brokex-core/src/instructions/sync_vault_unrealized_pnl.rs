@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_spl::token::TokenAccount;
 use crate::constants::*;
 use crate::error::CoreError;
 use crate::logic::{lp_reported_unrealized_pnl_from_trader_pnl, trader_unrealized_pnl_for_asset};
@@ -6,14 +7,18 @@ use crate::oracle;
 use crate::state::{Asset, ProtocolConfig};
 
 /// Validates merged oracle (§26), computes trader uPnL per asset (§22), and CPI-updates vault NAV input (§21).
+/// Callable only by protocol admin to prevent permissionless NAV manipulation.
 #[derive(Accounts)]
 pub struct SyncVaultUnrealizedPnl<'info> {
     #[account(
         seeds = [CONFIG_SEED],
         bump,
+        has_one = admin @ CoreError::Unauthorized,
         constraint = vault_state.key() == config.vault_state @ CoreError::Unauthorized,
     )]
     pub config: Account<'info, ProtocolConfig>,
+
+    pub admin: Signer<'info>,
 
     #[account(
         mut,
@@ -22,6 +27,12 @@ pub struct SyncVaultUnrealizedPnl<'info> {
         constraint = vault_state.key() == config.vault_state @ CoreError::Unauthorized,
     )]
     pub vault_state: Account<'info, brokex_vault::state::VaultState>,
+
+    #[account(
+        constraint = vault_token.key() == config.vault @ CoreError::Unauthorized,
+        constraint = vault_token.mint == config.usdc_mint @ CoreError::Unauthorized,
+    )]
+    pub vault_token: Account<'info, TokenAccount>,
 
     pub vault_program: Program<'info, brokex_vault::program::BrokexVault>,
 
@@ -57,6 +68,11 @@ pub fn sync_vault_unrealized_pnl_handler(
         let pyth_ai = &ctx.remaining_accounts[2 * i + 1];
         let asset = Account::<Asset>::try_from(asset_ai)
             .map_err(|_| error!(CoreError::InvalidOracleAssetAccount))?;
+        require_keys_eq!(
+            pyth_ai.key(),
+            asset.pyth_feed,
+            CoreError::FeedIdMismatch
+        );
 
         let price = oracle::get_validated_price(
             pyth_ai,
@@ -81,6 +97,7 @@ pub fn sync_vault_unrealized_pnl_handler(
     let cpi_accounts = brokex_vault::cpi::accounts::CoreSetReportedUnrealizedPnl {
         caller: ctx.accounts.settlement_authority.to_account_info(),
         vault_state: ctx.accounts.vault_state.to_account_info(),
+        vault_token: ctx.accounts.vault_token.to_account_info(),
     };
     let cpi_ctx = CpiContext::new_with_signer(
         ctx.accounts.vault_program.to_account_info().key(),

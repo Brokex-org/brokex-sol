@@ -20,6 +20,7 @@ pub fn initialize_handler(ctx: Context<Initialize>) -> Result<()> {
     state.total_locked_capital = 0;
     state.lp_mint = ctx.accounts.lp_mint.key();
     state.reported_unrealized_pnl = 0;
+    state.last_pnl_sync_slot = 0;
 
     Ok(())
 }

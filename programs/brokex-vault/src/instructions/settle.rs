@@ -3,6 +3,7 @@ use anchor_spl::token::{self, Transfer};
 
 use crate::VaultSettle;
 use crate::error::ErrorCode;
+use crate::vault_math;
 
 pub fn settle_handler(ctx: Context<VaultSettle>, profit: u64, loss: u64) -> Result<()> {
     require!(!ctx.accounts.vault_state.paused, ErrorCode::Paused);
@@ -13,15 +14,11 @@ pub fn settle_handler(ctx: Context<VaultSettle>, profit: u64, loss: u64) -> Resu
     let signer = &[seeds];
 
     if profit > 0 {
-        let free_capital = ctx
-            .accounts
-            .vault_token
-            .amount
-            .saturating_sub(ctx.accounts.vault_state.total_locked_capital);
-        require!(
-            profit <= free_capital,
-            ErrorCode::InsufficientFreeCapital
-        );
+        let free_capital = vault_math::free_capital(
+            ctx.accounts.vault_token.amount,
+            ctx.accounts.vault_state.total_locked_capital,
+        )?;
+        require!(profit <= free_capital, ErrorCode::InsufficientFreeCapital);
 
         let cpi_accounts = Transfer {
             from: ctx.accounts.vault_token.to_account_info(),

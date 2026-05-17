@@ -2,6 +2,7 @@ pub mod constants;
 pub mod error;
 pub mod instructions;
 pub mod state;
+pub mod vault_math;
 
 use anchor_lang::prelude::*;
 

@@ -261,6 +261,7 @@ impl Fixture {
             vault_accounts::AdminSetReportedUnrealizedPnl {
                 admin: self.admin.pubkey(),
                 vault_state: self.vault_state,
+                vault_token: self.vault_token,
             }
             .to_account_metas(None),
         )
@@ -1032,6 +1033,7 @@ fn admin_set_reported_pnl_non_admin_rejected() {
         vault_accounts::AdminSetReportedUnrealizedPnl {
             admin: f.attacker.pubkey(),
             vault_state: f.vault_state,
+            vault_token: f.vault_token,
         }
         .to_account_metas(None),
     );
@@ -1043,10 +1045,24 @@ fn admin_set_reported_pnl_non_admin_rejected() {
 fn admin_set_reported_pnl_updates_state() {
     let mut f = Fixture::new_uninitialized();
     f.initialize();
+    let ix = f.deposit_ix(f.admin_ata, 2_000_000);
+    exec_ok(&mut f.ctx, ix, &[&f.admin]);
     let ix = f.admin_set_pnl_ix(-500_000);
     exec_ok(&mut f.ctx, ix, &[&f.admin]);
     let st = f.vault_state_account();
     assert_eq!(st.reported_unrealized_pnl, -500_000);
+}
+
+#[test]
+fn admin_set_reported_pnl_clamps_to_vault_balance() {
+    let mut f = Fixture::new_uninitialized();
+    f.initialize();
+    let ix = f.deposit_ix(f.admin_ata, 1_000_000);
+    exec_ok(&mut f.ctx, ix, &[&f.admin]);
+    let ix = f.admin_set_pnl_ix(-9_999_999_999);
+    exec_ok(&mut f.ctx, ix, &[&f.admin]);
+    let st = f.vault_state_account();
+    assert_eq!(st.reported_unrealized_pnl, -1_000_000);
 }
 
 #[test]

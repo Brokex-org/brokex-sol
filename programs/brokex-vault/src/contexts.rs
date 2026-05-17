@@ -139,6 +139,13 @@ pub struct CoreSetReportedUnrealizedPnl<'info> {
         constraint = caller.key() == vault_state.core @ ErrorCode::NotCore,
     )]
     pub vault_state: Account<'info, state::VaultState>,
+
+    #[account(
+        constraint = vault_token.key() == vault_state.token_vault @ ErrorCode::InvalidVaultValue,
+        constraint = vault_token.mint == vault_state.stable_mint @ ErrorCode::InvalidVaultValue,
+        constraint = vault_token.owner == vault_state.key() @ ErrorCode::InvalidVaultValue,
+    )]
+    pub vault_token: Account<'info, TokenAccount>,
 }
 
 /// Admin override for `reported_unrealized_pnl` (ops / bootstrap; prefer `sync_vault_unrealized_pnl` on Core).
@@ -153,6 +160,13 @@ pub struct AdminSetReportedUnrealizedPnl<'info> {
         has_one = admin @ ErrorCode::NotOwner,
     )]
     pub vault_state: Account<'info, state::VaultState>,
+
+    #[account(
+        constraint = vault_token.key() == vault_state.token_vault @ ErrorCode::InvalidVaultValue,
+        constraint = vault_token.mint == vault_state.stable_mint @ ErrorCode::InvalidVaultValue,
+        constraint = vault_token.owner == vault_state.key() @ ErrorCode::InvalidVaultValue,
+    )]
+    pub vault_token: Account<'info, TokenAccount>,
 }
 
 /// Public LP deposit: USDC in, LP shares minted at NAV (Extended MVP §23).

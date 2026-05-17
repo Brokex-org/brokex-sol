@@ -1,0 +1,44 @@
+name: Auto-close linked issues on next-release
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - next-release
+
+permissions:
+  issues: write
+  pull-requests: read
+
+jobs:
+  close-issues:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Extract issue numbers from PR body
+        id: extract
+        run: |
+          echo "PR_BODY<<EOF" >> $GITHUB_ENV
+          echo "${{ github.event.pull_request.body }}" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+          # Extract issue numbers like #123, #45
+          ISSUES=$(echo "${{ github.event.pull_request.body }}" | grep -oE '#[0-9]+' | tr -d '#' | tr '\n' ' ')
+
+          echo "issues=$ISSUES" >> $GITHUB_OUTPUT
+
+      - name: Close issues
+        if: steps.extract.outputs.issues != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for issue in ${{ steps.extract.outputs.issues }}; do
+            echo "Closing issue #$issue"
+
+            curl -s -X PATCH \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/${{ github.repository }}/issues/$issue \
+              -d '{"state":"closed"}'
+          done

@@ -32,4 +32,7 @@ pub struct VaultState {
 
     /// Global unrealized PnL in raw stable units (signed). Must stay consistent with §22 once wired.
     pub reported_unrealized_pnl: i128,
+
+    /// Slot of the last successful `core_set_reported_unrealized_pnl` (monotonic; blocks stale replays).
+    pub last_pnl_sync_slot: u64,
 }

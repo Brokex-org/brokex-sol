@@ -405,22 +405,38 @@ pub fn validate_sl_tp(reference_price: u64, direction: PositionDirection, sl_pri
     Ok(())
 }
 
-/// Liquidation threshold 100%: `move = entryPrice * collateral / positionSize` (same as `entry/leverage` at open when `size = margin * leverage`).
+pub const MIN_LIQUIDATION_THRESHOLD_BPS: u16 = 9_000;
+pub const MAX_LIQUIDATION_THRESHOLD_BPS: u16 = 10_000;
+pub const DEFAULT_LIQUIDATION_THRESHOLD_BPS: u16 = 10_000;
+
+/// Extended MVP §16: `move = entryPrice * liquidationThreshold / leverage` (= `entry * liq_bps/10000 * collateral / size`).
 pub fn calculate_liquidation_price(
     entry_price: u64,
     position_size: u64,
     collateral: u64,
     direction: PositionDirection,
+    liquidation_threshold_bps: u16,
 ) -> Result<u64> {
     require!(entry_price > 0, CoreError::InvalidReferencePrice);
     require!(collateral > 0, CoreError::Overflow);
     require!(position_size > 0, CoreError::Overflow);
+    require!(
+        liquidation_threshold_bps >= MIN_LIQUIDATION_THRESHOLD_BPS
+            && liquidation_threshold_bps <= MAX_LIQUIDATION_THRESHOLD_BPS,
+        CoreError::InvalidCapitalParams
+    );
 
+    let divisor = (10_000u128)
+        .checked_mul(position_size as u128)
+        .ok_or(CoreError::Overflow)?;
     let move_amount = (entry_price as u128)
+        .checked_mul(liquidation_threshold_bps as u128)
+        .ok_or(CoreError::Overflow)?
         .checked_mul(collateral as u128)
         .ok_or(CoreError::Overflow)?
-        .checked_div(position_size as u128)
+        .checked_div(divisor)
         .ok_or(CoreError::Overflow)?;
+    require!(move_amount > 0, CoreError::InvalidCapitalParams);
     let move_u64 = u64::try_from(move_amount).map_err(|_| error!(CoreError::Overflow))?;
 
     let liq_price = match direction {
@@ -429,6 +445,63 @@ pub fn calculate_liquidation_price(
     };
 
     Ok(liq_price)
+}
+
+/// Trader-side unrealized PnL for one asset at `current_price` (Extended MVP §22). Positive = traders ahead.
+pub fn trader_unrealized_pnl_for_asset(asset: &crate::state::Asset, current_price: u64) -> Result<i128> {
+    require!(current_price > 0, CoreError::InvalidReferencePrice);
+    let mut total: i128 = 0;
+
+    if asset.oi_long > 0 {
+        let avg = asset
+            .sum_priced_oi_long
+            .checked_div(asset.oi_long as u128)
+            .ok_or(CoreError::Overflow)?;
+        let avg_u = u64::try_from(avg).map_err(|_| error!(CoreError::Overflow))?;
+        require!(avg_u > 0, CoreError::InvalidReferencePrice);
+        let diff = (current_price as i128)
+            .checked_sub(avg_u as i128)
+            .ok_or(CoreError::Overflow)?;
+        let mut pnl = (asset.oi_long as i128)
+            .checked_mul(diff)
+            .ok_or(CoreError::Overflow)?
+            .checked_div(avg_u as i128)
+            .ok_or(CoreError::Overflow)?;
+        let max_pnl = trade_lp_locked_capital(asset.oi_long, asset.profit_cap_fp)? as i128;
+        if pnl > max_pnl {
+            pnl = max_pnl;
+        }
+        total = total.checked_add(pnl).ok_or(CoreError::Overflow)?;
+    }
+
+    if asset.oi_short > 0 {
+        let avg = asset
+            .sum_priced_oi_short
+            .checked_div(asset.oi_short as u128)
+            .ok_or(CoreError::Overflow)?;
+        let avg_u = u64::try_from(avg).map_err(|_| error!(CoreError::Overflow))?;
+        require!(avg_u > 0, CoreError::InvalidReferencePrice);
+        let diff = (avg_u as i128)
+            .checked_sub(current_price as i128)
+            .ok_or(CoreError::Overflow)?;
+        let mut pnl = (asset.oi_short as i128)
+            .checked_mul(diff)
+            .ok_or(CoreError::Overflow)?
+            .checked_div(avg_u as i128)
+            .ok_or(CoreError::Overflow)?;
+        let max_pnl = trade_lp_locked_capital(asset.oi_short, asset.profit_cap_fp)? as i128;
+        if pnl > max_pnl {
+            pnl = max_pnl;
+        }
+        total = total.checked_add(pnl).ok_or(CoreError::Overflow)?;
+    }
+
+    Ok(total)
+}
+
+/// LP NAV adjustment: `vault_balance + reported` where positive trader PnL reduces LP value (§21).
+pub fn lp_reported_unrealized_pnl_from_trader_pnl(trader_pnl: i128) -> Result<i128> {
+    trader_pnl.checked_neg().ok_or(error!(CoreError::Overflow))
 }
 
 /// Extended MVP §§8–9 / EVM `_applySpread`. Uses **pre-trade** OI (book before this fill updates aggregates).
@@ -526,7 +599,7 @@ fn effective_spread_fp_u128(
 #[cfg(test)]
 mod funding_tests {
     use super::*;
-    use crate::state::Asset;
+    use crate::state::{Asset, PositionDirection};
     use anchor_lang::prelude::Pubkey;
 
     fn book(ol: u64, os: u64, base: u64, max: u64) -> Asset {
@@ -542,6 +615,7 @@ mod funding_tests {
             alpha_min_fp: DEFAULT_ALPHA_MIN_FP,
             alpha_scale: DEFAULT_ALPHA_SCALE,
             base_spread_fp: 0,
+            liquidation_threshold_bps: DEFAULT_LIQUIDATION_THRESHOLD_BPS,
             oi_long: ol,
             oi_short: os,
             risk_long: ol,
@@ -604,6 +678,40 @@ mod funding_tests {
     fn funding_fee_rejects_index_going_backwards() {
         let err = funding_fee_amount(1_000, 100, 99).unwrap_err();
         assert_eq!(err, anchor_lang::error::Error::from(CoreError::InvariantViolation));
+    }
+
+    #[test]
+    fn liquidation_threshold_90_percent_liquidates_earlier_than_100() {
+        let entry = 1_000_000u64;
+        let size = 10_000_000u64;
+        let margin = 1_000_000u64;
+        let liq_100 = calculate_liquidation_price(
+            entry,
+            size,
+            margin,
+            PositionDirection::Long,
+            MAX_LIQUIDATION_THRESHOLD_BPS,
+        )
+        .unwrap();
+        let liq_90 = calculate_liquidation_price(
+            entry,
+            size,
+            margin,
+            PositionDirection::Long,
+            MIN_LIQUIDATION_THRESHOLD_BPS,
+        )
+        .unwrap();
+        assert!(liq_90 > liq_100, "90% threshold should liquidate sooner (higher liq price for long)");
+    }
+
+    #[test]
+    fn trader_unrealized_pnl_long_profit_and_lp_sign() {
+        let mut a = book(1_000_000, 0, 10_000, 100_000);
+        a.sum_priced_oi_long = 1_000_000u128 * 900_000; // avg open 900_000
+        let trader = trader_unrealized_pnl_for_asset(&a, 1_000_000).unwrap();
+        assert!(trader > 0);
+        let reported = lp_reported_unrealized_pnl_from_trader_pnl(trader).unwrap();
+        assert!(reported < 0);
     }
 }
 

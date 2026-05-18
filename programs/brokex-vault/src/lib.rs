@@ -2,6 +2,7 @@ pub mod constants;
 pub mod error;
 pub mod instructions;
 pub mod state;
+pub mod vault_math;
 
 use anchor_lang::prelude::*;
 
@@ -21,10 +22,12 @@ pub mod brokex_vault {
     // also import `accounts` from the parent crate (e.g. re-exports), causing E0428 duplicate name.
     use anchor_lang::prelude::{Context, Result};
     use super::{
-        admin_set_reported_unrealized_pnl_handler, deposit_handler, initialize_handler,
+        admin_set_reported_unrealized_pnl_handler, core_set_reported_unrealized_pnl_handler,
+        deposit_handler, initialize_handler,
         lp_deposit_handler, lp_withdraw_handler, set_paused_handler, settle_handler,
         update_locked_capital_handler, withdraw_handler,
-        AdminSetPaused, AdminSetReportedUnrealizedPnl, Initialize, LpDeposit, LpWithdraw,
+        AdminSetPaused, AdminSetReportedUnrealizedPnl, CoreSetReportedUnrealizedPnl, Initialize,
+        LpDeposit, LpWithdraw,
         UpdateLockedCapital, VaultDeposit, VaultSettle, VaultWithdraw,
     };
 
@@ -52,7 +55,14 @@ pub mod brokex_vault {
         update_locked_capital_handler(ctx, delta)
     }
 
-    /// Admin-only NAV input until Core supplies §22 uPnL on-chain.
+    pub fn core_set_reported_unrealized_pnl(
+        ctx: Context<CoreSetReportedUnrealizedPnl>,
+        reported_unrealized_pnl: i128,
+    ) -> Result<()> {
+        core_set_reported_unrealized_pnl_handler(ctx, reported_unrealized_pnl)
+    }
+
+    /// Admin-only NAV override (prefer Core `sync_vault_unrealized_pnl`).
     pub fn admin_set_reported_unrealized_pnl(
         ctx: Context<AdminSetReportedUnrealizedPnl>,
         reported_unrealized_pnl: i128,

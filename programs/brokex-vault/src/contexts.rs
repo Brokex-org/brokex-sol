@@ -126,7 +126,29 @@ pub struct VaultWithdraw<'info> {
     pub token_program: Program<'info, Token>,
 }
 
-/// Admin updates global unrealized PnL used in LP NAV (Extended MVP §22; placeholder until Core feeds on-chain uPnL).
+/// Core updates vault `reported_unrealized_pnl` after §22 merged-oracle uPnL (Extended MVP §21–22).
+#[derive(Accounts)]
+pub struct CoreSetReportedUnrealizedPnl<'info> {
+    /// CHECK: Core settlement PDA; must match `VaultState.core`.
+    pub caller: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"vault"],
+        bump = vault_state.bump,
+        constraint = caller.key() == vault_state.core @ ErrorCode::NotCore,
+    )]
+    pub vault_state: Account<'info, state::VaultState>,
+
+    #[account(
+        constraint = vault_token.key() == vault_state.token_vault @ ErrorCode::InvalidVaultValue,
+        constraint = vault_token.mint == vault_state.stable_mint @ ErrorCode::InvalidVaultValue,
+        constraint = vault_token.owner == vault_state.key() @ ErrorCode::InvalidVaultValue,
+    )]
+    pub vault_token: Account<'info, TokenAccount>,
+}
+
+/// Admin override for `reported_unrealized_pnl` (ops / bootstrap; prefer `sync_vault_unrealized_pnl` on Core).
 #[derive(Accounts)]
 pub struct AdminSetReportedUnrealizedPnl<'info> {
     pub admin: Signer<'info>,
@@ -138,6 +160,13 @@ pub struct AdminSetReportedUnrealizedPnl<'info> {
         has_one = admin @ ErrorCode::NotOwner,
     )]
     pub vault_state: Account<'info, state::VaultState>,
+
+    #[account(
+        constraint = vault_token.key() == vault_state.token_vault @ ErrorCode::InvalidVaultValue,
+        constraint = vault_token.mint == vault_state.stable_mint @ ErrorCode::InvalidVaultValue,
+        constraint = vault_token.owner == vault_state.key() @ ErrorCode::InvalidVaultValue,
+    )]
+    pub vault_token: Account<'info, TokenAccount>,
 }
 
 /// Public LP deposit: USDC in, LP shares minted at NAV (Extended MVP §23).
@@ -276,4 +305,11 @@ pub struct UpdateLockedCapital<'info> {
         constraint = caller.key() == vault_state.core @ ErrorCode::NotCore,
     )]
     pub vault_state: Account<'info, state::VaultState>,
+
+    #[account(
+        constraint = vault_token.key() == vault_state.token_vault @ ErrorCode::InvalidVaultValue,
+        constraint = vault_token.mint == vault_state.stable_mint @ ErrorCode::InvalidVaultValue,
+        constraint = vault_token.owner == vault_state.key() @ ErrorCode::InvalidVaultValue,
+    )]
+    pub vault_token: Account<'info, TokenAccount>,
 }

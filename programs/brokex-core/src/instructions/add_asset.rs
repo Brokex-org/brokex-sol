@@ -21,6 +21,8 @@ pub struct AssetConfigInput {
     pub alpha_scale: u64,
     /// Spread fixed-point on [`crate::logic::PRECISION`]; `0` = disabled.
     pub base_spread_fp: u64,
+    /// Liquidation threshold bps (9000–10000); `0` uses 10000 (100%).
+    pub liquidation_threshold_bps: u16,
 }
 
 #[derive(Accounts)]
@@ -105,6 +107,18 @@ pub fn add_asset_handler(
     asset.alpha_min_fp = alpha_min_fp;
     asset.alpha_scale = alpha_scale;
     asset.base_spread_fp = config_input.base_spread_fp;
+
+    let liq_bps = if config_input.liquidation_threshold_bps == 0 {
+        crate::logic::DEFAULT_LIQUIDATION_THRESHOLD_BPS
+    } else {
+        config_input.liquidation_threshold_bps
+    };
+    require!(
+        liq_bps >= crate::logic::MIN_LIQUIDATION_THRESHOLD_BPS
+            && liq_bps <= crate::logic::MAX_LIQUIDATION_THRESHOLD_BPS,
+        CoreError::InvalidCapitalParams
+    );
+    asset.liquidation_threshold_bps = liq_bps;
 
     // Initialize state
     asset.oi_long = 0;

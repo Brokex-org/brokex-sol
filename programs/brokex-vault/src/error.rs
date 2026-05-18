@@ -55,4 +55,10 @@ pub enum ErrorCode {
 
     #[msg("Invalid unlock amount")]
     InvalidUnlockAmount,
+
+    #[msg("Vault invariant violated locked capital exceeds balance")]
+    InvariantViolation,
+
+    #[msg("Reported PnL sync slot is older than the last applied sync")]
+    StalePnlSync,
 }

@@ -136,6 +136,7 @@ pub fn emergency_close_handler(ctx: Context<EmergencyClose>, asset_id: String, _
         let cpi_accounts = brokex_vault::cpi::accounts::UpdateLockedCapital {
             caller: ctx.accounts.settlement_authority.to_account_info(),
             vault_state: ctx.accounts.vault_state.to_account_info(),
+            vault_token: ctx.accounts.vault_token_account.to_account_info(),
         };
         let cpi_ctx = CpiContext::new_with_signer(
             ctx.accounts.vault_program.to_account_info().key(),

@@ -245,6 +245,7 @@ pub fn remove_margin_handler(
         let cpi_accounts = brokex_vault::cpi::accounts::UpdateLockedCapital {
             caller: ctx.accounts.settlement_authority.to_account_info(),
             vault_state: ctx.accounts.vault_state.to_account_info(),
+            vault_token: ctx.accounts.vault_token_account.to_account_info(),
         };
         let cpi_ctx = CpiContext::new_with_signer(
             ctx.accounts.vault_program.to_account_info().key(),
@@ -306,6 +307,7 @@ pub fn remove_margin_handler(
             size_new,
             collateral_new,
             pm.direction,
+            asset.liquidation_threshold_bps,
         )?;
         match pm.direction {
             PositionDirection::Long => {

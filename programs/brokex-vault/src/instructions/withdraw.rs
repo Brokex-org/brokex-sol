@@ -3,14 +3,18 @@ use anchor_spl::token::{self, Transfer};
 
 use crate::VaultWithdraw;
 use crate::error::ErrorCode;
+use crate::vault_math;
 
 pub fn withdraw_handler(ctx: Context<VaultWithdraw>, amount: u64) -> Result<()> {
     require!(amount > 0, ErrorCode::ZeroAmount);
     require!(!ctx.accounts.vault_state.paused, ErrorCode::Paused);
-    require!(
-        ctx.accounts.vault_token.amount >= amount,
-        ErrorCode::InsufficientBalance
-    );
+    let vault_balance = ctx.accounts.vault_token.amount;
+    require!(vault_balance >= amount, ErrorCode::InsufficientBalance);
+    let free_capital = vault_math::free_capital(
+        vault_balance,
+        ctx.accounts.vault_state.total_locked_capital,
+    )?;
+    require!(amount <= free_capital, ErrorCode::InsufficientFreeCapital);
 
     let bump = ctx.accounts.vault_state.bump;
     let seeds: &[&[u8]] = &[b"vault", &[bump]];

@@ -154,4 +154,13 @@ pub mod brokex_core {
     ) -> Result<()> {
         instructions::validate_merged_oracle_snapshot_handler(ctx, max_age_secs, max_conf_bps)
     }
+
+    /// Merged-oracle uPnL (§22) → vault `reported_unrealized_pnl` for LP NAV (§21).
+    pub fn sync_vault_unrealized_pnl(
+        ctx: Context<SyncVaultUnrealizedPnl>,
+        max_age_secs: u64,
+        max_conf_bps: u64,
+    ) -> Result<()> {
+        instructions::sync_vault_unrealized_pnl_handler(ctx, max_age_secs, max_conf_bps)
+    }
 }

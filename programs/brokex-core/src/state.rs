@@ -40,6 +40,8 @@ pub struct Asset {
     pub alpha_scale: u64,
     /// Fixed-point on [`crate::logic::PRECISION`]; execution delta = `oracle * effective_spread / PRECISION`. `0` = no spread.
     pub base_spread_fp: u64,
+    /// Liquidation threshold in bps of margin (9000–10000 = 90%–100%; Extended MVP §15–16).
+    pub liquidation_threshold_bps: u16,
 
     // State
     pub oi_long: u64,

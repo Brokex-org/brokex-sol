@@ -2,6 +2,7 @@
 
 mod admin_set_paused;
 mod admin_set_reported_unrealized_pnl;
+mod core_set_reported_unrealized_pnl;
 mod deposit;
 mod initialize;
 mod lp_deposit;
@@ -13,6 +14,7 @@ mod update_locked_capital;
 
 pub use admin_set_paused::set_paused_handler;
 pub use admin_set_reported_unrealized_pnl::admin_set_reported_unrealized_pnl_handler;
+pub use core_set_reported_unrealized_pnl::core_set_reported_unrealized_pnl_handler;
 pub use deposit::deposit_handler;
 pub use initialize::initialize_handler;
 pub use lp_deposit::lp_deposit_handler;

@@ -170,6 +170,7 @@ pub struct AdminSetReportedUnrealizedPnl<'info> {
 }
 
 /// Public LP deposit: USDC in, LP shares minted at NAV (Extended MVP §23).
+/// Requires `sync_vault_unrealized_pnl` → vault CPI in the **same transaction / slot** (§26).
 #[derive(Accounts)]
 pub struct LpDeposit<'info> {
     #[account(mut)]
@@ -215,6 +216,7 @@ pub struct LpDeposit<'info> {
 }
 
 /// Public LP withdraw: burn shares, USDC out capped by free capital (Extended MVP §§24–25).
+/// Requires merged-oracle NAV sync in the **same transaction / slot** (§26).
 #[derive(Accounts)]
 pub struct LpWithdraw<'info> {
     #[account(mut)]

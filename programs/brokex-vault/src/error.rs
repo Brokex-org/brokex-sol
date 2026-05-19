@@ -61,4 +61,7 @@ pub enum ErrorCode {
 
     #[msg("Reported PnL sync slot is older than the last applied sync")]
     StalePnlSync,
+
+    #[msg("LP action requires core_set_reported_unrealized_pnl in the same slot (bundle sync_vault_unrealized_pnl first)")]
+    StaleLpNav,
 }

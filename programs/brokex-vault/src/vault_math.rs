@@ -9,6 +9,16 @@ pub fn free_capital(vault_balance: u64, total_locked: u64) -> Result<u64> {
         .ok_or(error!(ErrorCode::InvariantViolation))
 }
 
+/// LP deposit/withdraw must use NAV from a merged-oracle sync in the same slot (Extended MVP §26).
+pub fn require_lp_nav_synced_in_current_slot(last_pnl_sync_slot: u64) -> Result<()> {
+    let slot = Clock::get()?.slot;
+    require!(
+        last_pnl_sync_slot == slot,
+        ErrorCode::StaleLpNav
+    );
+    Ok(())
+}
+
 /// Keep `vault_balance + reported` within `[-vault_balance, +vault_balance]` (symmetric vs vault USDC).
 pub fn clamp_reported_unrealized_pnl(reported: i128, vault_balance: u64) -> i128 {
     if vault_balance == 0 {

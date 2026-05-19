@@ -7,18 +7,15 @@ use crate::oracle;
 use crate::state::{Asset, ProtocolConfig};
 
 /// Validates merged oracle (§26), computes trader uPnL per asset (§22), and CPI-updates vault NAV input (§21).
-/// Callable only by protocol admin to prevent permissionless NAV manipulation.
+/// Permissionless: merged-proof checks are the authorization gate (§26).
 #[derive(Accounts)]
 pub struct SyncVaultUnrealizedPnl<'info> {
     #[account(
         seeds = [CONFIG_SEED],
         bump,
-        has_one = admin @ CoreError::Unauthorized,
         constraint = vault_state.key() == config.vault_state @ CoreError::Unauthorized,
     )]
     pub config: Account<'info, ProtocolConfig>,
-
-    pub admin: Signer<'info>,
 
     #[account(
         mut,

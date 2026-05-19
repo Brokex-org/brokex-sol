@@ -2,9 +2,10 @@ use anchor_lang::prelude::*;
 
 /// Vault configuration and LP accounting (Extended MVP §§20–25).
 ///
-/// `reported_unrealized_pnl` is **off-chain / admin supplied** until Core wires §22 merged-oracle
-/// uPnL into a dedicated updater; LP math always uses `vault_usdc_balance + reported_unrealized_pnl`
-/// for NAV (§21).
+/// `reported_unrealized_pnl` is set by Core via `core_set_reported_unrealized_pnl` after
+/// `sync_vault_unrealized_pnl` (merged oracle §26 → uPnL §22). LP math uses
+/// `vault_usdc_balance + reported_unrealized_pnl` for NAV (§21); LP deposit/withdraw require
+/// `last_pnl_sync_slot == current slot` (bundle sync in the same transaction).
 #[account]
 #[derive(InitSpace)]
 pub struct VaultState {

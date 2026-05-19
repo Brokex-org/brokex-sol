@@ -11,6 +11,7 @@ pub fn lp_withdraw_handler(ctx: Context<LpWithdraw>, shares: u64, min_usdc: u64)
     require!(!ctx.accounts.vault_state.paused, ErrorCode::Paused);
 
     let vault_state = &ctx.accounts.vault_state;
+    vault_math::require_lp_nav_synced_in_current_slot(vault_state.last_pnl_sync_slot)?;
     require_keys_eq!(
         ctx.accounts.lp_mint.key(),
         vault_state.lp_mint,

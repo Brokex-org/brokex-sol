@@ -10,10 +10,12 @@ pub fn core_set_reported_unrealized_pnl_handler(
 ) -> Result<()> {
     let slot = Clock::get()?.slot;
     let vault_state = &mut ctx.accounts.vault_state;
-    require!(
-        slot >= vault_state.last_pnl_sync_slot,
-        ErrorCode::StalePnlSync
-    );
+    if vault_state.last_pnl_sync_slot != vault_math::LP_NAV_NEVER_SYNCED {
+        require!(
+            slot >= vault_state.last_pnl_sync_slot,
+            ErrorCode::StalePnlSync
+        );
+    }
     vault_state.last_pnl_sync_slot = slot;
 
     let balance = ctx.accounts.vault_token.amount;

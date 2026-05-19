@@ -16,20 +16,11 @@ use anchor_lang::{
 use anchor_litesvm::{AnchorContext, AnchorLiteSVM, Signer};
 use brokex_vault::{accounts as vault_accounts, instruction as vault_ix, state::VaultState};
 use litesvm_utils::{AssertionHelpers, TestHelpers, TransactionResult};
-use std::path::PathBuf;
+#[path = "../../brokex-core/tests/common/mod.rs"]
+mod program_elf;
 
 fn program_bytes() -> &'static [u8] {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/brokex_vault.so");
-    let data = std::fs::read(&path).unwrap_or_else(|e| {
-        panic!(
-            "cannot read vault program artifact at {}: {e}\n\
-Run from repo root: `yarn prep:program-keys && anchor build` (or `yarn test:rust:litesvm`).\n\
-If the file loads but `Initialize` fails with InvalidProgramId on `token_program`, rebuild anyway — \
-the .so likely predates the current `Initialize` account layout (e.g. `lp_mint`).",
-            path.display()
-        )
-    });
-    Box::leak(data.into_boxed_slice())
+    program_elf::load_program_elf("brokex_vault")
 }
 
 fn program_id() -> Pubkey {
@@ -55,6 +46,25 @@ fn exec_ok(
     signers: &[&anchor_litesvm::Keypair],
 ) {
     exec(ctx, ix, signers).assert_success();
+}
+
+fn exec_ok_instructions(
+    ctx: &mut AnchorContext,
+    instructions: Vec<Instruction>,
+    signers: &[&anchor_litesvm::Keypair],
+) {
+    ctx.execute_instructions(instructions, signers)
+        .expect("execute_instructions wrapper error")
+        .assert_success();
+}
+
+fn exec_instructions(
+    ctx: &mut AnchorContext,
+    instructions: Vec<Instruction>,
+    signers: &[&anchor_litesvm::Keypair],
+) -> TransactionResult {
+    ctx.execute_instructions(instructions, signers)
+        .expect("execute_instructions wrapper error")
 }
 
 /// Anchor logs / error strings use variant names or `#[msg(...)]` text.
@@ -284,12 +294,6 @@ impl Fixture {
         )
     }
 
-    /// Refreshes `last_pnl_sync_slot` for the current slot (stand-in for merged-oracle sync in vault-only tests).
-    fn refresh_lp_nav_slot(&mut self, reported_unrealized_pnl: i128) {
-        let ix = self.core_set_pnl_ix(reported_unrealized_pnl);
-        exec_ok(&mut self.ctx, ix, &[&self.core]);
-    }
-
     fn lp_deposit_ix(
         &self,
         user: &anchor_litesvm::Keypair,
@@ -340,6 +344,7 @@ impl Fixture {
         self.ctx.get_account(&self.vault_state).expect("vault state")
     }
 
+    /// Same transaction as production: `core_set_reported_unrealized_pnl` then LP ix (§26).
     fn exec_lp_deposit(
         &mut self,
         user: &anchor_litesvm::Keypair,
@@ -347,9 +352,10 @@ impl Fixture {
         amount: u64,
         min_shares: u64,
     ) {
-        self.refresh_lp_nav_slot(0);
-        let ix = self.lp_deposit_ix(user, user_usdc, amount, min_shares);
-        exec_ok(&mut self.ctx, ix, &[user]);
+        self.ctx.svm.expire_blockhash();
+        let sync = self.core_set_pnl_ix(0);
+        let lp = self.lp_deposit_ix(user, user_usdc, amount, min_shares);
+        exec_ok_instructions(&mut self.ctx, vec![sync, lp], &[user, &self.core]);
     }
 
     fn exec_lp_withdraw(
@@ -359,9 +365,40 @@ impl Fixture {
         shares: u64,
         min_usdc: u64,
     ) {
-        self.refresh_lp_nav_slot(0);
-        let ix = self.lp_withdraw_ix(user, user_usdc, shares, min_usdc);
-        exec_ok(&mut self.ctx, ix, &[user]);
+        self.ctx.svm.expire_blockhash();
+        let sync = self.core_set_pnl_ix(0);
+        let lp = self.lp_withdraw_ix(user, user_usdc, shares, min_usdc);
+        exec_ok_instructions(&mut self.ctx, vec![sync, lp], &[user, &self.core]);
+    }
+
+    fn exec_lp_deposit_expect_err(
+        &mut self,
+        user: &anchor_litesvm::Keypair,
+        user_usdc: Pubkey,
+        amount: u64,
+        min_shares: u64,
+        code: &str,
+    ) {
+        self.ctx.svm.expire_blockhash();
+        let sync = self.core_set_pnl_ix(0);
+        let lp = self.lp_deposit_ix(user, user_usdc, amount, min_shares);
+        let r = exec_instructions(&mut self.ctx, vec![sync, lp], &[user, &self.core]);
+        assert_anchor_err(&r, code);
+    }
+
+    fn exec_lp_withdraw_expect_err(
+        &mut self,
+        user: &anchor_litesvm::Keypair,
+        user_usdc: Pubkey,
+        shares: u64,
+        min_usdc: u64,
+        code: &str,
+    ) {
+        self.ctx.svm.expire_blockhash();
+        let sync = self.core_set_pnl_ix(0);
+        let lp = self.lp_withdraw_ix(user, user_usdc, shares, min_usdc);
+        let r = exec_instructions(&mut self.ctx, vec![sync, lp], &[user, &self.core]);
+        assert_anchor_err(&r, code);
     }
 }
 
@@ -727,6 +764,7 @@ fn initialize_sets_lp_mint_and_zero_reported_pnl() {
     assert_eq!(st.lp_mint, f.lp_mint);
     assert_eq!(st.reported_unrealized_pnl, 0);
     assert_eq!(st.total_locked_capital, 0);
+    assert_eq!(st.last_pnl_sync_slot, u64::MAX);
 }
 
 #[test]
@@ -808,8 +846,6 @@ fn lp_second_deposit_mints_pro_rata_shares() {
         .expect("user lp ata");
 
     f.exec_lp_deposit(&lp_user, lp_usdc, 10_000_000, 0);
-    // Same ix data + same signers + same blockhash ⇒ duplicate tx signature (AlreadyProcessed).
-    f.ctx.svm.expire_blockhash();
     // vault 10M, supply 10M LP; second deposit 10M USDC -> balance 20M, shares = 10M * 10M / 20M = 5M
     f.exec_lp_deposit(&lp_user, lp_usdc, 10_000_000, 0);
     let lp_ata = user_lp_ata(lp_user.pubkey(), f.lp_mint);
@@ -840,13 +876,9 @@ fn lp_deposit_rounds_to_zero_shares_rejected() {
         .expect("user lp ata");
 
     f.exec_lp_deposit(&lp_user, lp_usdc, 10_000_000, 0);
-    f.ctx.svm.expire_blockhash();
 
     f.ctx.svm.assert_token_balance(&f.vault_token, 10_000_000);
-    f.refresh_lp_nav_slot(0);
-    let ix = f.lp_deposit_ix(&lp_user, lp_usdc, 1, 0);
-    let r = exec(&mut f.ctx, ix, &[&lp_user]);
-    assert_anchor_err(&r, "AmountTooSmall");
+    f.exec_lp_deposit_expect_err(&lp_user, lp_usdc, 1, 0, "AmountTooSmall");
     f.ctx.svm.assert_token_balance(&f.vault_token, 10_000_000);
 }
 
@@ -914,10 +946,7 @@ fn lp_withdraw_rejects_when_not_enough_free_capital() {
     exec_ok(&mut f.ctx, ix, &[&f.core]);
 
     let lp_ata = user_lp_ata(lp_user.pubkey(), f.lp_mint);
-    f.refresh_lp_nav_slot(0);
-    let ix = f.lp_withdraw_ix(&lp_user, lp_usdc, 9_000_000, 0);
-    let r = exec(&mut f.ctx, ix, &[&lp_user]);
-    assert_anchor_err(&r, "InsufficientFreeCapital");
+    f.exec_lp_withdraw_expect_err(&lp_user, lp_usdc, 9_000_000, 0, "InsufficientFreeCapital");
     // balances unchanged on failure
     f.ctx.svm.assert_token_balance(&lp_ata, 10_000_000);
 }
@@ -970,7 +999,6 @@ fn lp_withdraw_zero_rejected() {
         .create_associated_token_account(&f.lp_mint, &lp_user)
         .expect("user lp ata");
     f.exec_lp_deposit(&lp_user, lp_usdc, 1_000_000, 0);
-    f.refresh_lp_nav_slot(0);
     let ix = f.lp_withdraw_ix(&lp_user, lp_usdc, 0, 0);
     let r = exec(&mut f.ctx, ix, &[&lp_user]);
     assert_anchor_err(&r, "ZeroAmount");
@@ -998,10 +1026,7 @@ fn lp_deposit_slippage_rejected() {
         .create_associated_token_account(&f.lp_mint, &lp_user)
         .expect("user lp ata");
     // genesis mints 1:1; impossible min
-    f.refresh_lp_nav_slot(0);
-    let ix = f.lp_deposit_ix(&lp_user, lp_usdc, 1_000_000, 2_000_000);
-    let r = exec(&mut f.ctx, ix, &[&lp_user]);
-    assert_anchor_err(&r, "SlippageExceeded");
+    f.exec_lp_deposit_expect_err(&lp_user, lp_usdc, 1_000_000, 2_000_000, "SlippageExceeded");
 }
 
 #[test]
@@ -1026,10 +1051,7 @@ fn lp_withdraw_slippage_rejected() {
         .create_associated_token_account(&f.lp_mint, &lp_user)
         .expect("user lp ata");
     f.exec_lp_deposit(&lp_user, lp_usdc, 4_000_000, 0);
-    f.refresh_lp_nav_slot(0);
-    let ix = f.lp_withdraw_ix(&lp_user, lp_usdc, 1_000_000, 5_000_000);
-    let r = exec(&mut f.ctx, ix, &[&lp_user]);
-    assert_anchor_err(&r, "SlippageExceeded");
+    f.exec_lp_withdraw_expect_err(&lp_user, lp_usdc, 1_000_000, 5_000_000, "SlippageExceeded");
 }
 
 #[test]
@@ -1055,7 +1077,6 @@ fn lp_deposit_paused_rejected() {
         .svm
         .create_associated_token_account(&f.lp_mint, &lp_user)
         .expect("user lp ata");
-    f.refresh_lp_nav_slot(0);
     let ix = f.lp_deposit_ix(&lp_user, lp_usdc, 1_000_000, 0);
     let r = exec(&mut f.ctx, ix, &[&lp_user]);
     assert_anchor_err(&r, "Paused");
@@ -1085,7 +1106,6 @@ fn lp_withdraw_paused_rejected() {
     f.exec_lp_deposit(&lp_user, lp_usdc, 2_000_000, 0);
     let ix = f.set_paused_ix(true);
     exec_ok(&mut f.ctx, ix, &[&f.admin]);
-    f.refresh_lp_nav_slot(0);
     let ix = f.lp_withdraw_ix(&lp_user, lp_usdc, 500_000, 0);
     let r = exec(&mut f.ctx, ix, &[&lp_user]);
     assert_anchor_err(&r, "Paused");

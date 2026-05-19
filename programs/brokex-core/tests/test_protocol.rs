@@ -5,17 +5,25 @@ use anchor_lang::{
     InstructionData, ToAccountMetas,
 };
 use brokex_core::{constants::*, state::*};
-use std::path::PathBuf;
+
+mod common;
 
 fn brokex_core_elf() -> &'static [u8] {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/brokex_core.so");
-    let data = std::fs::read(&path).unwrap_or_else(|e| {
-        panic!(
-            "missing {} — run `yarn prep:program-keys && anchor build` from the repo root (or `yarn test:rust:litesvm`): {e}",
-            path.display()
-        )
-    });
-    Box::leak(data.into_boxed_slice())
+    common::load_program_elf("brokex_core")
+}
+
+fn asset_config() -> brokex_core::instructions::AssetConfigInput {
+    brokex_core::instructions::AssetConfigInput {
+        commission_open_bps: 0,
+        base_spread_bps: 0,
+        base_funding_per_year: 10_000,
+        max_funding_per_year: 1_000_000,
+        profit_cap_fp: 0,
+        alpha_min_fp: 0,
+        alpha_scale: 0,
+        base_spread_fp: 0,
+        liquidation_threshold_bps: 0,
+    }
 }
 
 fn send_ix(ctx: &mut AnchorContext, ix: Instruction, admin: &anchor_litesvm::Keypair) {
@@ -67,24 +75,22 @@ fn test_protocol_flow() {
         data: brokex_core::instruction::AddAsset {
             asset_id: asset_id.clone(),
             pyth_feed,
-            config_input: brokex_core::instructions::AssetConfigInput {
-                commission_open_bps: 0,
-                base_spread_bps: 0,
-                base_funding_per_year: 10_000,
-                max_funding_per_year: 1_000_000,
-                profit_cap_fp: 0,
-                alpha_min_fp: 0,
-                alpha_scale: 0,
-                base_spread_fp: 0,
-                liquidation_threshold_bps: 0,
-            }
+            config_input: asset_config(),
         }
         .data(),
     };
     send_ix(&mut ctx, add_asset_ix, &admin);
 
+    let asset_data: Asset = ctx.get_account(&asset_pda).expect("asset not found");
+    assert!(asset_data.is_enabled);
+
     let config_data: ProtocolConfig = ctx.get_account(&config_pda).expect("config not found");
-    assert_eq!(config_data.active_enabled_asset_count, 1);
+    assert_eq!(
+        config_data.active_enabled_asset_count,
+        1,
+        "active_enabled_asset_count should be 1 after add_asset — rebuild the program \
+         artifact (`yarn test:rust:litesvm` or `anchor build`) so target/deploy/brokex_core.so matches this source"
+    );
 
     let toggle_asset_ix = Instruction {
         program_id,
@@ -97,6 +103,11 @@ fn test_protocol_flow() {
         data: brokex_core::instruction::ToggleAssetStatus { is_enabled: false }.data(),
     };
     send_ix(&mut ctx, toggle_asset_ix, &admin);
+
+    let config_data: ProtocolConfig = ctx.get_account(&config_pda).expect("config not found");
+    assert_eq!(config_data.active_enabled_asset_count, 0);
+    let asset_data: Asset = ctx.get_account(&asset_pda).expect("asset not found");
+    assert!(!asset_data.is_enabled);
 
     let toggle_protocol_ix = Instruction {
         program_id,

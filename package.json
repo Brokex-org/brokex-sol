@@ -5,7 +5,7 @@
     "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check",
     "check:rust": "cargo check -p brokex-core -p brokex-vault",
     "test:rust": "cargo test --workspace -- --nocapture",
-    "test:rust:litesvm": "yarn prep:program-keys && anchor build && cargo test --workspace --features litesvm-integration -- --nocapture",
+    "test:rust:litesvm": "yarn prep:program-keys && anchor build && cargo build-sbf --manifest-path programs/brokex-core/Cargo.toml --features mock-oracle --sbf-out-dir target/deploy && cargo build-sbf --manifest-path programs/brokex-vault/Cargo.toml --sbf-out-dir target/deploy && cargo test --workspace --features litesvm-integration -- --nocapture",
     "prep:program-keys": "mkdir -p target/deploy && cp deploy/brokex_core-keypair.json target/deploy/brokex-core-keypair.json && cp deploy/brokex_vault-keypair.json target/deploy/brokex-vault-keypair.json && cp deploy/brokex_core-keypair.json target/deploy/brokex_core-keypair.json && cp deploy/brokex_vault-keypair.json target/deploy/brokex_vault-keypair.json",
     "build:mock-oracle:sbf": "cargo build-sbf --manifest-path programs/brokex-vault/Cargo.toml --features mock-oracle --sbf-out-dir target/deploy && cargo build-sbf --manifest-path programs/brokex-core/Cargo.toml --features mock-oracle --sbf-out-dir target/deploy",
     "test:anchor": "yarn prep:program-keys && anchor build && anchor test --skip-build --validator legacy",

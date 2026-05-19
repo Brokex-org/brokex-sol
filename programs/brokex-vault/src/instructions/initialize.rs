@@ -2,6 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::Initialize;
 use crate::error::ErrorCode;
+use crate::vault_math;
 
 pub fn initialize_handler(ctx: Context<Initialize>) -> Result<()> {
     require!(
@@ -20,7 +21,7 @@ pub fn initialize_handler(ctx: Context<Initialize>) -> Result<()> {
     state.total_locked_capital = 0;
     state.lp_mint = ctx.accounts.lp_mint.key();
     state.reported_unrealized_pnl = 0;
-    state.last_pnl_sync_slot = 0;
+    state.last_pnl_sync_slot = vault_math::LP_NAV_NEVER_SYNCED;
 
     Ok(())
 }

@@ -79,9 +79,13 @@ jobs:
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'all' || github.event.inputs.test_suite == 'build-only' || github.event.inputs.test_suite == 'rust' }}
         run: anchor build
 
-      - name: Rust tests (includes LiteSVM — needs target/deploy/*.so)
+      - name: Rust tests (LiteSVM — needs fresh target/deploy/*.so)
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'all' || github.event.inputs.test_suite == 'rust' }}
-        run: cargo test --workspace --features litesvm-integration -- --nocapture
+        run: |
+          # anchor build updates deploy/*.so; refresh with current sources (core needs mock-oracle for merged-oracle tests).
+          cargo build-sbf --manifest-path programs/brokex-core/Cargo.toml --features mock-oracle --sbf-out-dir target/deploy
+          cargo build-sbf --manifest-path programs/brokex-vault/Cargo.toml --sbf-out-dir target/deploy
+          cargo test --workspace --features litesvm-integration,mock-oracle -- --nocapture
 
       - name: TypeScript lifecycle tests
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.test_suite == 'all' || github.event.inputs.test_suite == 'typescript' }}
@@ -92,4 +96,4 @@ jobs:
         run: |
           echo "## Anchor CI" >> "$GITHUB_STEP_SUMMARY"
           echo "- Anchor ${ANCHOR_VERSION}, Solana and AVM on PATH for this job" >> "$GITHUB_STEP_SUMMARY"
-          echo "- LiteSVM tests run after \`anchor build\` so program artifacts exist" >> "$GITHUB_STEP_SUMMARY"
+          echo "- LiteSVM tests run after \`anchor build\` + \`cargo build-sbf --sbf-out-dir target/deploy\` (core with \`mock-oracle\`)" >> "$GITHUB_STEP_SUMMARY"

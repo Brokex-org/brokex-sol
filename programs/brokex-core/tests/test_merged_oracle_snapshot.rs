@@ -1,4 +1,6 @@
-//! Requires `target/deploy/brokex_core.so` built with `--features mock-oracle` (see `package.json` `build:mock-oracle:sbf`).
+//! Requires `brokex_core.so` built with `--features mock-oracle` (see `package.json` `build:mock-oracle:sbf`).
+mod common;
+
 use anchor_lang::solana_program::system_program;
 use anchor_lang::{AccountDeserialize, AccountSerialize, AnchorSerialize, InstructionData, ToAccountMetas};
 use anchor_litesvm::{
@@ -7,17 +9,8 @@ use anchor_litesvm::{
 };
 use brokex_core::{constants::*, state::*};
 use solana_account::Account as StoredAccount;
-use std::path::PathBuf;
-
 fn brokex_core_elf() -> &'static [u8] {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/deploy/brokex_core.so");
-    let data = std::fs::read(&path).unwrap_or_else(|e| {
-        panic!(
-            "missing {} — run `yarn build:mock-oracle:sbf` then retry: {e}",
-            path.display()
-        )
-    });
-    Box::leak(data.into_boxed_slice())
+    common::load_program_elf("brokex_core")
 }
 
 fn asset_config() -> brokex_core::instructions::AssetConfigInput {

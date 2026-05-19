@@ -2,6 +2,9 @@ use anchor_lang::prelude::*;
 
 use crate::error::ErrorCode;
 
+/// Vault has never received a merged-oracle NAV sync (`core_set_reported_unrealized_pnl`).
+pub const LP_NAV_NEVER_SYNCED: u64 = u64::MAX;
+
 /// `freeCapital = vaultBalance - totalLocked` (§25). Errors if locked exceeds balance.
 pub fn free_capital(vault_balance: u64, total_locked: u64) -> Result<u64> {
     vault_balance
@@ -13,7 +16,7 @@ pub fn free_capital(vault_balance: u64, total_locked: u64) -> Result<u64> {
 pub fn require_lp_nav_synced_in_current_slot(last_pnl_sync_slot: u64) -> Result<()> {
     let slot = Clock::get()?.slot;
     require!(
-        last_pnl_sync_slot == slot,
+        last_pnl_sync_slot != LP_NAV_NEVER_SYNCED && last_pnl_sync_slot == slot,
         ErrorCode::StaleLpNav
     );
     Ok(())
@@ -41,5 +44,10 @@ mod tests {
     fn clamp_symmetric_to_vault_balance() {
         assert_eq!(clamp_reported_unrealized_pnl(-5_000, 1_000), -1_000);
         assert_eq!(clamp_reported_unrealized_pnl(5_000, 1_000), 1_000);
+    }
+
+    #[test]
+    fn lp_nav_never_synced_constant() {
+        assert_eq!(LP_NAV_NEVER_SYNCED, u64::MAX);
     }
 }
